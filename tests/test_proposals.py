@@ -183,3 +183,59 @@ def test_proposals_requires_api_key():
     assert response.json() == {
         "detail": "Invalid or missing API key"
     }
+
+def test_delete_proposal():
+    supplier = create_supplier()
+    procurement_event = create_procurement_event()
+
+    create_response = client.post(
+        "/proposals",
+        json={
+            "supplier_id": supplier["id"],
+            "procurement_event_id": procurement_event["id"],
+        },
+    )
+
+    assert create_response.status_code == 201
+
+    proposal_id = create_response.json()["id"]
+
+    delete_response = client.delete(
+        f"/proposals/{proposal_id}"
+    )
+
+    assert delete_response.status_code == 204
+
+    get_response = client.get(
+        f"/proposals/{proposal_id}"
+    )
+
+    assert get_response.status_code == 404
+
+def test_create_duplicate_proposal():
+    supplier = create_supplier()
+    procurement_event = create_procurement_event()
+
+    proposal_data = {
+        "supplier_id": supplier["id"],
+        "procurement_event_id": procurement_event["id"],
+    }
+
+    first_response = client.post(
+        "/proposals",
+        json=proposal_data,
+    )
+
+    assert first_response.status_code == 201
+
+    second_response = client.post(
+        "/proposals",
+        json=proposal_data,
+    )
+
+    assert second_response.status_code == 409
+    assert second_response.json() == {
+        "detail": (
+            "Supplier already has a proposal for this procurement event"
+        )
+    }

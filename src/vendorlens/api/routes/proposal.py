@@ -51,6 +51,22 @@ def create_proposal(
             detail="Procurement event not found",
         )
 
+    existing_proposal_statement = select(Proposal).where(
+        Proposal.supplier_id == proposal_data.supplier_id,
+        Proposal.procurement_event_id
+        == proposal_data.procurement_event_id,
+    )
+
+    existing_proposal = db.scalars(
+        existing_proposal_statement
+    ).first()
+
+    if existing_proposal is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Supplier already has a proposal for this procurement event",
+        )
+
     proposal = Proposal(
         supplier_id=proposal_data.supplier_id,
         procurement_event_id=proposal_data.procurement_event_id,
@@ -90,3 +106,22 @@ def get_proposal(
         )
 
     return proposal
+
+@router.delete("/{proposal_id}", status_code=204)
+def delete_proposal(
+    proposal_id: uuid.UUID,
+    db: Session = Depends(get_db),
+):
+    statement = select(Proposal).where(
+        Proposal.id == proposal_id
+    )
+    proposal = db.scalars(statement).first()
+
+    if proposal is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Proposal not found",
+        )
+
+    db.delete(proposal)
+    db.commit()

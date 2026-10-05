@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -16,6 +16,14 @@ if TYPE_CHECKING:
 
 class Proposal(Base):
     __tablename__ = "proposals"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "supplier_id",
+            "procurement_event_id",
+            name="uq_proposal_supplier_event",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
