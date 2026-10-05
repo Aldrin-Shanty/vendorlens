@@ -7,7 +7,6 @@ from sqlalchemy.orm import sessionmaker
 from vendorlens.api.dependencies import get_db
 from vendorlens.api.main import app
 from vendorlens.db.base import Base
-from vendorlens.db.models.supplier import Supplier
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 
@@ -30,6 +29,15 @@ TestSessionLocal = sessionmaker(
     autoflush=False,
     expire_on_commit=False,
 )
+
+@pytest.fixture
+def db():
+    session = TestSessionLocal()
+
+    try:
+        yield session
+    finally:
+        session.close()
 
 def override_get_db():
     db = TestSessionLocal()
