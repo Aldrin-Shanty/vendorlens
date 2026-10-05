@@ -9,7 +9,7 @@ import os
 
 from dotenv import load_dotenv
 from vendorlens.db.base import Base
-from vendorlens.db.models.supplier import Supplier
+import vendorlens.db.models
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

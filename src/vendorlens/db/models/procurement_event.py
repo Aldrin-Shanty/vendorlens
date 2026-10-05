@@ -7,14 +7,14 @@ from sqlalchemy import String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from vendorlens.db.base import Base 
+from vendorlens.db.base import Base
 
 if TYPE_CHECKING:
     from vendorlens.db.models.proposal import Proposal
 
 
-class Supplier(Base):
-    __tablename__ = "suppliers"
+class ProcurementEvent(Base):
+    __tablename__ = "procurement_events"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -22,11 +22,11 @@ class Supplier(Base):
         default=uuid.uuid4,
     )
 
-    name: Mapped[str] = mapped_column(
+    title: Mapped[str] = mapped_column(
         String(200),
         nullable=False,
     )
 
     proposals: Mapped[list[Proposal]] = relationship(
-        back_populates="supplier",
+        back_populates="procurement_event",
     )
