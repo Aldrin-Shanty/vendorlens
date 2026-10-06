@@ -11,6 +11,7 @@ from vendorlens.db.base import Base
 
 
 if TYPE_CHECKING:
+    from vendorlens.db.models.chunk import Chunk
     from vendorlens.db.models.document import Document
 
 
@@ -44,11 +45,16 @@ class DocumentVersion(Base):
         nullable=False,
     )
 
+    storage_key: Mapped[str] = mapped_column(
+            String(500),
+            nullable=False,
+        )
+
+
     document: Mapped[Document] = relationship(
         back_populates="versions",
     )
 
-    storage_key: Mapped[str] = mapped_column(
-        String(500),
-        nullable=False,
+    chunks: Mapped[list[Chunk]] = relationship(
+        back_populates="document_version",
     )

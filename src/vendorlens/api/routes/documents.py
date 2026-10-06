@@ -4,8 +4,8 @@ import uuid
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from pathlib import Path
 
+from vendorlens.api.storage_dependencies import get_storage
 from vendorlens.services.storage import LocalFileStorage
 from vendorlens.api.dependencies import get_db
 from vendorlens.db.models.document import Document
@@ -17,10 +17,6 @@ router = APIRouter(
     prefix="/proposals/{proposal_id}/documents",
     tags=["documents"],
     dependencies=[Depends(require_api_key)],
-)
-
-storage = LocalFileStorage(
-    Path("data/uploads")
 )
 
 CHUNK_SIZE = 1024 * 1024  # 1 MiB
@@ -37,6 +33,7 @@ async def upload_document(
     proposal_id: uuid.UUID,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    storage: LocalFileStorage = Depends(get_storage),
 ):
     proposal_statement = select(Proposal).where(
         Proposal.id == proposal_id

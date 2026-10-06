@@ -4,6 +4,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from vendorlens.api.storage_dependencies import get_storage
+from vendorlens.services.storage import LocalFileStorage
 from vendorlens.api.dependencies import get_db
 from vendorlens.api.main import app
 from vendorlens.db.base import Base
@@ -39,6 +41,17 @@ def db():
     finally:
         session.close()
 
+@pytest.fixture
+def temp_storage(tmp_path):
+    storage = LocalFileStorage(tmp_path)
+
+    app.dependency_overrides[get_storage] = lambda: storage
+
+    try:
+        yield storage
+    finally:
+        app.dependency_overrides.pop(get_storage, None)
+
 def override_get_db():
     db = TestSessionLocal()
 
@@ -46,6 +59,5 @@ def override_get_db():
         yield db
     finally:
         db.close()
-
 
 app.dependency_overrides[get_db] = override_get_db
