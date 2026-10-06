@@ -220,7 +220,6 @@ def test_semantic_search_finds_warranty_chunk(db, temp_storage):
 def test_search_procurement_event_api(temp_storage):
     proposal = create_proposal()
 
-    # Upload the PDF first so there is something to search
     with SAMPLE_PDF.open("rb") as pdf:
         upload_response = client.post(
             f"/proposals/{proposal['id']}/documents",
@@ -235,7 +234,6 @@ def test_search_procurement_event_api(temp_storage):
 
     assert upload_response.status_code == 201
 
-    # Search the uploaded document through the API
     response = client.post(
         f"/procurement-events/{proposal['procurement_event_id']}/search",
         json={
@@ -252,3 +250,56 @@ def test_search_procurement_event_api(temp_storage):
     assert results[0]["supplier_name"] == "Test Supplier"
     assert results[0]["page_number"] == 1
     assert "warranty" in results[0]["text"].lower()
+
+def test_ask_procurement_event_api(
+    temp_storage,
+    monkeypatch,
+):
+    proposal = create_proposal()
+
+    with SAMPLE_PDF.open("rb") as pdf:
+        upload_response = client.post(
+            f"/proposals/{proposal['id']}/documents",
+            files={
+                "file": (
+                    "sample_proposal.pdf",
+                    pdf,
+                    "application/pdf",
+                )
+            },
+        )
+
+    assert upload_response.status_code == 201
+
+    def fake_generate_answer(prompt: str) -> str:
+        assert "three years" in prompt.lower()
+        return "The laptop warranty is three years [Evidence 1]."
+
+    monkeypatch.setattr(
+        "vendorlens.services.rag.generate_answer",
+        fake_generate_answer,
+    )
+
+    response = client.post(
+        f"/procurement-events/{proposal['procurement_event_id']}/ask",
+        json={
+            "question": "How long is the laptop warranty?"
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["answer"] == (
+        "The laptop warranty is three years [Evidence 1]."
+    )
+
+    assert len(body["retrieved_evidence"]) >= 1
+
+    evidence = body["retrieved_evidence"][0]
+
+    assert evidence["supplier_name"] == "Test Supplier"
+    assert evidence["filename"] == "sample_proposal.pdf"
+    assert evidence["page_number"] == 1
+    assert "warranty" in evidence["text"].lower()
