@@ -1,10 +1,13 @@
-from json import load
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from vendorlens.api.main import app
+from vendorlens.db.models.chunk import Chunk
+from vendorlens.services.retrieval import semantic_search
 
 load_dotenv()
 
@@ -19,6 +22,11 @@ client = TestClient(
     headers={"X-API-Key": API_KEY},
 )
 
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+SAMPLE_PDF = FIXTURES_DIR / "sample_proposal.pdf"
+
+def sample_pdf_bytes() -> bytes:
+    return SAMPLE_PDF.read_bytes()
 
 def test_duplicate_document_upload(temp_storage):
     supplier_response = client.post(
@@ -27,7 +35,6 @@ def test_duplicate_document_upload(temp_storage):
     )
 
     assert supplier_response.status_code == 201
-
     supplier = supplier_response.json()
 
     event_response = client.post(
@@ -36,7 +43,6 @@ def test_duplicate_document_upload(temp_storage):
     )
 
     assert event_response.status_code == 201
-
     event = event_response.json()
 
     proposal_response = client.post(
@@ -48,10 +54,9 @@ def test_duplicate_document_upload(temp_storage):
     )
 
     assert proposal_response.status_code == 201
-
     proposal = proposal_response.json()
 
-    pdf_bytes = b"%PDF-1.4 fake test pdf"
+    pdf_bytes = sample_pdf_bytes()
 
     files = {
         "file": (
@@ -133,7 +138,7 @@ def test_upload_document_to_missing_proposal(temp_storage):
         files={
             "file": (
                 "proposal.pdf",
-                b"%PDF-1.4 fake pdf",
+                sample_pdf_bytes(),
                 "application/pdf",
             )
         },
@@ -143,3 +148,63 @@ def test_upload_document_to_missing_proposal(temp_storage):
     assert response.json() == {
         "detail": "Proposal not found"
     }
+
+def test_upload_document_creates_chunks(
+    temp_storage,
+    db,
+):
+    proposal = create_proposal()
+
+    response = client.post(
+        f"/proposals/{proposal['id']}/documents",
+        files={
+            "file": (
+                "proposal.pdf",
+                sample_pdf_bytes(),
+                "application/pdf",
+            )
+        },
+    )
+
+    assert response.status_code == 201
+
+    chunks = db.scalars(
+        select(Chunk).order_by(Chunk.chunk_index)
+    ).all()
+
+    assert len(chunks) > 0
+
+    first_chunk = chunks[0]
+
+    assert first_chunk.page_number == 1
+    assert first_chunk.chunk_index == 0
+    assert "warranty period is three years" in first_chunk.text
+
+    assert chunks[0].embedding is not None
+    assert len(chunks[0].embedding) == 384
+
+def test_semantic_search_finds_warranty_chunk(db, temp_storage):
+    proposal = create_proposal()
+
+    with SAMPLE_PDF.open("rb") as pdf:
+        response = client.post(
+            f"/proposals/{proposal['id']}/documents",
+            files={
+                "file": (
+                    "sample_proposal.pdf",
+                    pdf,
+                    "application/pdf",
+                )
+            },
+        )
+
+    assert response.status_code == 201
+
+    results = semantic_search(
+        db,
+        "How long is the supplier warranty?",
+        limit=1,
+    )
+
+    assert len(results) == 1
+    assert "warranty" in results[0].text.lower()

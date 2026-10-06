@@ -12,6 +12,7 @@ from vendorlens.db.models.document import Document
 from vendorlens.db.models.document_version import DocumentVersion
 from vendorlens.db.models.proposal import Proposal
 from vendorlens.core.security import require_api_key
+from vendorlens.services.ingestion import ingest_document_version
 
 router = APIRouter(
     prefix="/proposals/{proposal_id}/documents",
@@ -100,25 +101,33 @@ async def upload_document(
             status_code=409,
             detail="This file has already been uploaded for this proposal",
     )
-
-    document = Document(
-        proposal_id=proposal.id,
-    )
-
-    db.add(document)
-    db.flush()
-
-    document_version = DocumentVersion(
-        document_id=document.id,
-        filename=file.filename or "unknown.pdf",
-        content_type=file.content_type,
-        sha256=sha256,
-        storage_key=storage_key,
-    )
-
-    db.add(document_version)
     try:
+        document = Document(
+            proposal_id=proposal.id,
+        )
+
+        db.add(document)
+        db.flush()
+
+        document_version = DocumentVersion(
+            document_id=document.id,
+            filename=file.filename or "unknown.pdf",
+            content_type=file.content_type,
+            sha256=sha256,
+            storage_key=storage_key,
+        )
+
+        db.add(document_version)
+        db.flush()
+
+        ingest_document_version(
+        db=db,
+        document_version=document_version,
+        path=storage.get_path(storage_key),
+        )
+
         db.commit()
+
     except Exception:
         db.rollback()
         storage.delete(storage_key)
