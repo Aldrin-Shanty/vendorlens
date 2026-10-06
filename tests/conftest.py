@@ -1,7 +1,7 @@
 import os
 import pytest
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 from vendorlens.api.storage_dependencies import get_storage
@@ -17,6 +17,17 @@ if TEST_DATABASE_URL is None:
 
 test_engine = create_engine(TEST_DATABASE_URL)
 
+with test_engine.begin() as connection:
+    connection.execute(
+        text("CREATE EXTENSION IF NOT EXISTS vector")
+    )
+
+TestSessionLocal = sessionmaker(
+    bind=test_engine,
+    autoflush=False,
+    expire_on_commit=False,
+)
+
 @pytest.fixture(autouse=True)
 def reset_database():
     Base.metadata.drop_all(bind=test_engine)
@@ -25,12 +36,6 @@ def reset_database():
     yield
 
     Base.metadata.drop_all(bind=test_engine)
-
-TestSessionLocal = sessionmaker(
-    bind=test_engine,
-    autoflush=False,
-    expire_on_commit=False,
-)
 
 @pytest.fixture
 def db():
