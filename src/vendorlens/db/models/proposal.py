@@ -12,7 +12,7 @@ from vendorlens.db.base import Base
 if TYPE_CHECKING:
     from vendorlens.db.models.procurement_event import ProcurementEvent
     from vendorlens.db.models.supplier import Supplier
-
+    from vendorlens.db.models.document import Document
 
 class Proposal(Base):
     __tablename__ = "proposals"
@@ -49,4 +49,8 @@ class Proposal(Base):
 
     procurement_event: Mapped[ProcurementEvent] = relationship(
         back_populates="proposals",
+    )
+
+    documents: Mapped[list[Document]] = relationship(
+    back_populates="proposal",
     )
