@@ -7,11 +7,13 @@ from vendorlens.db.engine import engine
 from vendorlens.api.routes.supplier import router as supplier_router
 from vendorlens.api.routes.procurement_event import router as procurement_event_router
 from vendorlens.api.routes.proposal import router as proposal_router
+from vendorlens.api.routes.documents import router as documents_router
 
 app = FastAPI(title="VendorLens")
 app.include_router(supplier_router)
 app.include_router(procurement_event_router)
 app.include_router(proposal_router)
+app.include_router(documents_router)
 
 @app.middleware("http")
 async def add_request_id(

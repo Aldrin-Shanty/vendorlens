@@ -5,27 +5,15 @@
 
 # Python virtual environments
 .venv/
-venv/
 
 # Python cache
 __pycache__/
 *.py[cod]
 
-# Test / coverage cache
+# Test cache
 .pytest_cache/
-.coverage
-htmlcov/
-
-# Type checker / linter caches
-.mypy_cache/
-.ruff_cache/
 
 # IDE/editor files
 .vscode/
-.idea/
 
-# OS-generated files
-Thumbs.db
-
-# Local logs
-*.log
+data/

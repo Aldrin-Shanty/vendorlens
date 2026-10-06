@@ -47,3 +47,8 @@ class DocumentVersion(Base):
     document: Mapped[Document] = relationship(
         back_populates="versions",
     )
+
+    storage_key: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+    )

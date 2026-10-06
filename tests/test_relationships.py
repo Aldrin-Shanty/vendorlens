@@ -90,6 +90,7 @@ def test_document_relationships(db):
         filename="dell-pricing.pdf",
         content_type="application/pdf",
         sha256="a" * 64,
+        storage_key = "test/dell-pricing.pdf"
     )
 
     db.add(document_version)
