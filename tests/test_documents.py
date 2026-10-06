@@ -202,9 +202,53 @@ def test_semantic_search_finds_warranty_chunk(db, temp_storage):
 
     results = semantic_search(
         db,
-        "How long is the supplier warranty?",
+        procurement_event_id=proposal["procurement_event_id"],
+        query="How long is the supplier warranty?",
         limit=1,
     )
 
     assert len(results) == 1
-    assert "warranty" in results[0].text.lower()
+
+    result = results[0]
+
+    assert result.supplier_name == "Test Supplier"
+    assert result.filename == "sample_proposal.pdf"
+    assert result.page_number == 1
+    assert "warranty" in result.text.lower()
+    assert result.distance >= 0
+
+def test_search_procurement_event_api(temp_storage):
+    proposal = create_proposal()
+
+    # Upload the PDF first so there is something to search
+    with SAMPLE_PDF.open("rb") as pdf:
+        upload_response = client.post(
+            f"/proposals/{proposal['id']}/documents",
+            files={
+                "file": (
+                    "sample_proposal.pdf",
+                    pdf,
+                    "application/pdf",
+                )
+            },
+        )
+
+    assert upload_response.status_code == 201
+
+    # Search the uploaded document through the API
+    response = client.post(
+        f"/procurement-events/{proposal['procurement_event_id']}/search",
+        json={
+            "query": "How long is the warranty?",
+            "limit": 1,
+        },
+    )
+
+    assert response.status_code == 200
+
+    results = response.json()
+
+    assert len(results) == 1
+    assert results[0]["supplier_name"] == "Test Supplier"
+    assert results[0]["page_number"] == 1
+    assert "warranty" in results[0]["text"].lower()
