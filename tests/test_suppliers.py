@@ -135,3 +135,41 @@ def test_suppliers_requires_api_key():
     assert response.json() == {
         "detail": "Invalid or missing API key"
     }
+
+def test_delete_supplier_with_existing_proposal():
+    supplier_response = client.post(
+        "/suppliers",
+        json={"name": "Referenced Supplier"},
+    )
+
+    assert supplier_response.status_code == 201
+    supplier = supplier_response.json()
+
+    procurement_event_response = client.post(
+        "/procurement-events",
+        json={"title": "Laptop Procurement 2027"},
+    )
+
+    assert procurement_event_response.status_code == 201
+    procurement_event = procurement_event_response.json()
+
+    proposal_response = client.post(
+        "/proposals",
+        json={
+            "supplier_id": supplier["id"],
+            "procurement_event_id": procurement_event["id"],
+        },
+    )
+
+    assert proposal_response.status_code == 201
+
+    response = client.delete(
+        f"/suppliers/{supplier['id']}"
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": (
+            "Supplier cannot be deleted because it has existing proposals"
+        )
+    }

@@ -151,3 +151,47 @@ def test_procurement_events_requires_api_key():
     assert response.json() == {
         "detail": "Invalid or missing API key"
     }
+
+def test_delete_procurement_event_with_existing_proposal():
+    # Create supplier
+    supplier_response = client.post(
+        "/suppliers",
+        json={"name": "Referenced Supplier"},
+    )
+
+    assert supplier_response.status_code == 201
+    supplier = supplier_response.json()
+
+    # Create procurement event
+    procurement_event_response = client.post(
+        "/procurement-events",
+        json={"title": "Referenced Procurement Event"},
+    )
+
+    assert procurement_event_response.status_code == 201
+    procurement_event = procurement_event_response.json()
+
+    # Create proposal connecting the supplier and event
+    proposal_response = client.post(
+        "/proposals",
+        json={
+            "supplier_id": supplier["id"],
+            "procurement_event_id": procurement_event["id"],
+        },
+    )
+
+    assert proposal_response.status_code == 201
+
+    # Procurement event is referenced by the proposal,
+    # so deletion should be rejected.
+    response = client.delete(
+        f"/procurement-events/{procurement_event['id']}"
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": (
+            "Procurement event cannot be deleted because "
+            "it has existing proposals"
+        )
+    }

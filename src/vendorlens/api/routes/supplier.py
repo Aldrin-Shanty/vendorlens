@@ -8,6 +8,7 @@ from vendorlens.api.dependencies import get_db
 from vendorlens.api.schemas.supplier import SupplierCreate, SupplierRead, SupplierUpdate
 from vendorlens.db.models.supplier import Supplier
 from vendorlens.core.security import require_api_key
+from vendorlens.db.models.proposal import Proposal
 
 router = APIRouter(
     prefix="/suppliers",
@@ -91,5 +92,18 @@ def delete_supplier(
             detail="Supplier not found",
         )
 
+    proposal_statement = select(Proposal).where(
+        Proposal.supplier_id == supplier_id
+    )
+
+    proposal = db.scalars(proposal_statement).first()
+
+    if proposal is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Supplier cannot be deleted because it has existing proposals"
+            ),
+        )
     db.delete(supplier)
     db.commit()

@@ -5,13 +5,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vendorlens.api.dependencies import get_db
-from vendorlens.api.schemas.procurement_event import (
-    ProcurementEventCreate,
-    ProcurementEventRead,
-    ProcurementEventUpdate,
-)
+from vendorlens.api.schemas.procurement_event import ProcurementEventCreate, ProcurementEventRead, ProcurementEventUpdate
 from vendorlens.core.security import require_api_key
 from vendorlens.db.models.procurement_event import ProcurementEvent
+from vendorlens.db.models.proposal import Proposal
 
 
 router = APIRouter(
@@ -107,5 +104,18 @@ def delete_procurement_event(
             detail="Procurement event not found",
         )
 
+    proposal_statement = select(Proposal).where(
+        Proposal.procurement_event_id == procurement_event_id
+    )
+
+    proposal = db.scalars(proposal_statement).first()
+
+    if proposal is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Procurement event cannot be deleted because it has existing proposals"
+            ),
+        )
     db.delete(procurement_event)
     db.commit()
