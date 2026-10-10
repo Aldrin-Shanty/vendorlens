@@ -29,6 +29,7 @@ def semantic_search(
     procurement_event_id: uuid.UUID,
     query: str,
     limit: int = 5,
+    supplier_id: uuid.UUID | None = None,
 ) -> list[SearchResult]:
     query_embedding = embed_text(query)
 
@@ -65,9 +66,14 @@ def semantic_search(
             Proposal.procurement_event_id == procurement_event_id,
             Chunk.embedding.is_not(None),
         )
-        .order_by(distance)
-        .limit(limit)
     )
+
+    if supplier_id is not None:
+        statement = statement.where(
+            Proposal.supplier_id == supplier_id
+        )
+
+    statement = statement.order_by(distance).limit(limit)
 
     rows = db.execute(statement).all()
 

@@ -17,18 +17,13 @@ def extract_facts_for_supplier(
     supplier_name: str,
 ) -> SupplierFacts:
 
-    results = semantic_search(
+    supplier_results = semantic_search(
         db=db,
         procurement_event_id=procurement_event_id,
         query="unit price currency warranty period delivery timeline",
         limit=20,
+        supplier_id=supplier_id,
     )
-
-    supplier_results = [
-        result
-        for result in results
-        if result.supplier_id == supplier_id
-    ]
 
     if not supplier_results:
         raise ValueError(

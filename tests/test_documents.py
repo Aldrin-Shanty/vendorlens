@@ -202,22 +202,27 @@ def test_semantic_search_finds_warranty_chunk(db, temp_storage):
 
     assert response.status_code == 201
 
+    # Search only within this supplier's proposals
     results = semantic_search(
         db,
         procurement_event_id=proposal["procurement_event_id"],
         query="How long is the supplier warranty?",
         limit=1,
+        supplier_id=proposal["supplier_id"],
     )
 
     assert len(results) == 1
 
     result = results[0]
 
+    # Existing assertions
     assert result.supplier_name == "Test Supplier"
     assert result.filename == "sample_proposal.pdf"
     assert result.page_number == 1
     assert "warranty" in result.text.lower()
     assert result.distance >= 0
+
+    assert str(result.supplier_id) == proposal["supplier_id"]
 
 def test_search_procurement_event_api(temp_storage):
     proposal = create_proposal()
@@ -380,3 +385,90 @@ def validate_supplier_evidence(
             raise ValueError(
                 "Supplier facts reference invalid evidence IDs"
             )
+
+def test_semantic_search_excludes_other_suppliers(db, temp_storage):
+    # Create the first supplier, event, and proposal
+    dell_proposal = create_proposal()
+
+    event_id = dell_proposal["procurement_event_id"]
+    dell_id = dell_proposal["supplier_id"]
+
+    # Create another supplier
+    hp_response = client.post(
+        "/suppliers",
+        json={"name": "HP Supplier"},
+    )
+    assert hp_response.status_code == 201
+
+    hp_id = hp_response.json()["id"]
+
+    # Create HP's proposal for the SAME procurement event
+    hp_proposal_response = client.post(
+        "/proposals",
+        json={
+            "supplier_id": hp_id,
+            "procurement_event_id": event_id,
+        },
+    )
+    assert hp_proposal_response.status_code == 201
+
+    hp_proposal = hp_proposal_response.json()
+
+    # Upload a document for each supplier
+    for proposal in [dell_proposal, hp_proposal]:
+        with SAMPLE_PDF.open("rb") as pdf:
+            upload_response = client.post(
+                f"/proposals/{proposal['id']}/documents",
+                files={
+                    "file": (
+                        "sample_proposal.pdf",
+                        pdf,
+                        "application/pdf",
+                    )
+                },
+            )
+
+        assert upload_response.status_code == 201
+
+    # Search only Dell's evidence
+    dell_results = semantic_search(
+        db=db,
+        procurement_event_id=event_id,
+        query="laptop warranty",
+        limit=10,
+        supplier_id=dell_id,
+    )
+
+    assert len(dell_results) >= 1
+
+    assert all(
+        str(result.supplier_id) == dell_id
+        for result in dell_results
+    )
+
+    # Search only HP's evidence
+    hp_results = semantic_search(
+        db=db,
+        procurement_event_id=event_id,
+        query="laptop warranty",
+        limit=10,
+        supplier_id=hp_id,
+    )
+
+    assert len(hp_results) >= 1
+
+    assert all(
+        str(result.supplier_id) == hp_id
+        for result in hp_results
+    )
+
+    # Verify neither result set contains the other supplier
+    assert not any(
+        str(result.supplier_id) == hp_id
+        for result in dell_results
+    )
+
+    assert not any(
+        str(result.supplier_id) == dell_id
+        for result in hp_results
+    )

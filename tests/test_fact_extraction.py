@@ -4,10 +4,7 @@ import pytest
 
 from vendorlens.services import fact_extraction
 from vendorlens.services.retrieval import SearchResult
-from vendorlens.services.supplier_comparison import (
-    FactEvidence,
-    SupplierFacts,
-)
+from vendorlens.services.supplier_comparison import FactEvidence, SupplierFacts
 
 
 def make_search_result(
@@ -50,10 +47,17 @@ def test_extract_facts_for_supplier(monkeypatch):
         procurement_event_id,
         query,
         limit,
+        supplier_id,
     ):
         assert procurement_event_id == event_id
+        assert supplier_id == dell_id
         assert limit == 20
-        return results
+
+        return [
+            result
+            for result in results
+            if result.supplier_id == supplier_id
+        ]
 
     def fake_extract_supplier_facts(prompt: str):
         assert "1200 USD" in prompt
