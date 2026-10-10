@@ -8,6 +8,8 @@ from sqlalchemy import select
 from vendorlens.api.main import app
 from vendorlens.db.models.chunk import Chunk
 from vendorlens.services.retrieval import semantic_search
+from vendorlens.services.structured_output import GroundedAnswer
+from vendorlens.services.supplier_comparison import FactEvidence, SupplierFacts, validate_supplier_evidence
 
 load_dotenv()
 
@@ -271,13 +273,72 @@ def test_ask_procurement_event_api(
 
     assert upload_response.status_code == 201
 
-    def fake_generate_answer(prompt: str) -> str:
+    def fake_generate_structured_answer(prompt: str) -> GroundedAnswer:
         assert "three years" in prompt.lower()
-        return "The laptop warranty is three years [Evidence 1]."
+
+        return GroundedAnswer(
+            answer="The laptop warranty is three years.",
+            supported=True,
+            evidence_ids=[1],
+        )
 
     monkeypatch.setattr(
-        "vendorlens.services.rag.generate_answer",
-        fake_generate_answer,
+        "vendorlens.services.rag.generate_structured_answer",
+        fake_generate_structured_answer,
+    )
+
+    response = client.post(
+        f"/procurement-events/{proposal['procurement_event_id']}/ask",
+        json={
+            "question": "How long is the laptop warranty?"
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["answer"] == "The laptop warranty is three years."
+
+    assert len(body["retrieved_evidence"]) >= 1
+
+    evidence = body["retrieved_evidence"][0]
+
+    assert evidence["supplier_name"] == "Test Supplier"
+    assert evidence["filename"] == "sample_proposal.pdf"
+    assert evidence["page_number"] == 1
+    assert "warranty" in evidence["text"].lower()
+
+def test_ask_rejects_invalid_evidence_ids(
+    temp_storage,
+    monkeypatch,
+):
+    proposal = create_proposal()
+
+    with SAMPLE_PDF.open("rb") as pdf:
+        upload_response = client.post(
+            f"/proposals/{proposal['id']}/documents",
+            files={
+                "file": (
+                    "sample_proposal.pdf",
+                    pdf,
+                    "application/pdf",
+                )
+            },
+        )
+
+    assert upload_response.status_code == 201
+
+    def fake_generate_structured_answer(prompt: str) -> GroundedAnswer:
+        return GroundedAnswer(
+            answer="The laptop warranty is three years.",
+            supported=True,
+            evidence_ids=[99],
+        )
+
+    monkeypatch.setattr(
+        "vendorlens.services.rag.generate_structured_answer",
+        fake_generate_structured_answer,
     )
 
     response = client.post(
@@ -292,14 +353,30 @@ def test_ask_procurement_event_api(
     body = response.json()
 
     assert body["answer"] == (
-        "The laptop warranty is three years [Evidence 1]."
+        "I could not verify the evidence references in the generated answer."
     )
 
     assert len(body["retrieved_evidence"]) >= 1
 
-    evidence = body["retrieved_evidence"][0]
+def validate_supplier_evidence(
+    facts: SupplierFacts,
+    evidence_count: int,
+) -> None:
+    valid_ids = set(range(1, evidence_count + 1))
 
-    assert evidence["supplier_name"] == "Test Supplier"
-    assert evidence["filename"] == "sample_proposal.pdf"
-    assert evidence["page_number"] == 1
-    assert "warranty" in evidence["text"].lower()
+    evidence_fields = [
+        facts.unit_price_evidence,
+        facts.warranty_evidence,
+        facts.delivery_evidence,
+    ]
+
+    for evidence in evidence_fields:
+        if evidence is None:
+            continue
+
+        referenced_ids = set(evidence.evidence_ids)
+
+        if not referenced_ids.issubset(valid_ids):
+            raise ValueError(
+                "Supplier facts reference invalid evidence IDs"
+            )

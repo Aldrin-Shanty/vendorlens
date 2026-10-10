@@ -3,9 +3,8 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from vendorlens.services.llm import generate_answer
+from vendorlens.services.llm import generate_structured_answer
 from vendorlens.services.retrieval import SearchResult, semantic_search
-
 
 @dataclass
 class RAGResult:
@@ -46,27 +45,46 @@ def answer_question(
     prompt = f"""
 You are VendorLens, a procurement analysis assistant.
 
-Answer the user's question using ONLY the evidence provided below.
+Answer the question using ONLY the evidence below.
+
+Return ONLY a JSON object with exactly these fields:
+- "answer": a concise string
+- "supported": a boolean
+- "evidence_ids": an array of integer evidence IDs
 
 Rules:
 - Do not use outside knowledge.
 - Do not invent missing information.
-- If the evidence does not contain the answer, say that the available evidence is insufficient.
-- Cite supporting evidence using [Evidence 1], [Evidence 2], etc.
-- Keep the answer concise.
+- Set supported to true only if the evidence answers the question.
+- If supported is true, include the IDs of the supporting evidence.
+- If supported is false, return an empty evidence_ids array.
+- If evidence is insufficient, explain that in the answer.
+- Evidence IDs must refer to the numbered evidence provided below.
 
 Question:
 {question}
 
 Evidence:
 {evidence}
-
-Answer:
 """
 
-    answer = generate_answer(prompt)
+    structured_answer = generate_structured_answer(prompt)
+
+    valid_evidence_ids = set(range(1, len(results)+1))
+
+    if not set(structured_answer.evidence_ids).issubset(valid_evidence_ids):
+        return RAGResult(
+            answer="I could not verify the evidence references in the generated answer.",
+            retrieved_evidence=results,
+        )
+
+    if not structured_answer.supported:
+        return RAGResult(
+            answer="The available evidence is insufficient to answer this question.",
+            retrieved_evidence=results,
+        )
 
     return RAGResult(
-        answer=answer,
+        answer=structured_answer.answer,
         retrieved_evidence=results,
-    )   
+    )

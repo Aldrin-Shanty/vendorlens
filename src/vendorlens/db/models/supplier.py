@@ -7,7 +7,7 @@ from sqlalchemy import String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from vendorlens.db.base import Base 
+from vendorlens.db.base import Base
 
 if TYPE_CHECKING:
     from vendorlens.db.models.proposal import Proposal
