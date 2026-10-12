@@ -4,10 +4,8 @@ from sqlalchemy.orm import Session
 
 from vendorlens.services.llm import extract_supplier_facts
 from vendorlens.services.retrieval import semantic_search
-from vendorlens.services.supplier_comparison import (
-    SupplierFacts,
-    validate_supplier_evidence,
-)
+from vendorlens.services.schemas.supplier_comparison import SupplierFacts
+from vendorlens.services.evidence_validation import validate_supplier_evidence
 
 
 def extract_facts_for_supplier(

@@ -1,9 +1,11 @@
 import uuid
 
 import pytest
+from pydantic import ValidationError
 
 from vendorlens.services.retrieval import SearchResult
-from vendorlens.services.supplier_comparison import FactEvidence, SupplierFacts, validate_supplier_evidence
+from vendorlens.services.schemas.supplier_comparison import FactEvidence, SupplierFacts, SupplierComparison, SupplierComparisonEntry
+from vendorlens.services.evidence_validation import validate_supplier_evidence
 
 
 def test_supplier_evidence_rejects_other_supplier():
@@ -47,4 +49,30 @@ def test_supplier_evidence_rejects_other_supplier():
             facts=dell_facts,
             supplier_id=dell_id,
             results=results,
+        )
+
+def test_supplier_comparison_requires_unique_suppliers():
+    event_id = uuid.uuid4()
+    dell_id = uuid.uuid4()
+
+    dell_facts = SupplierFacts(
+        supplier_name="Dell",
+    )
+
+    with pytest.raises(
+        ValidationError,
+        match="A supplier cannot appear more than once",
+    ):
+        SupplierComparison(
+            procurement_event_id=event_id,
+            suppliers=[
+                SupplierComparisonEntry(
+                    supplier_id=dell_id,
+                    facts=dell_facts,
+                ),
+                SupplierComparisonEntry(
+                    supplier_id=dell_id,
+                    facts=dell_facts,
+                ),
+            ],
         )

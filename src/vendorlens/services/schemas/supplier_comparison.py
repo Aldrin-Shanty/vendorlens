@@ -2,8 +2,6 @@ import uuid
 
 from pydantic import BaseModel, Field, model_validator
 
-from vendorlens.services.retrieval import SearchResult
-
 
 class FactEvidence(BaseModel):
     evidence_ids: list[int] = Field(min_length=1)
@@ -39,9 +37,7 @@ class SupplierFacts(BaseModel):
 
         for value, evidence, field_name in pairs:
             if value is not None and evidence is None:
-                raise ValueError(
-                    f"{field_name} requires evidence"
-                )
+                raise ValueError(f"{field_name} requires evidence")
 
             if value is None and evidence is not None:
                 raise ValueError(
@@ -50,35 +46,26 @@ class SupplierFacts(BaseModel):
 
         return self
 
-def validate_supplier_evidence(
-    facts: SupplierFacts,
-    supplier_id: uuid.UUID,
-    results: list[SearchResult],
-) -> None:
-    evidence_by_id = {
-        index: result
-        for index, result in enumerate(results, start=1)
-    }
 
-    evidence_fields = [
-        facts.unit_price_evidence,
-        facts.warranty_evidence,
-        facts.delivery_evidence,
-    ]
+class SupplierComparisonEntry(BaseModel):
+    supplier_id: uuid.UUID
+    facts: SupplierFacts
 
-    for evidence in evidence_fields:
-        if evidence is None:
-            continue
 
-        for evidence_id in evidence.evidence_ids:
-            result = evidence_by_id.get(evidence_id)
+class SupplierComparison(BaseModel):
+    procurement_event_id: uuid.UUID
+    suppliers: list[SupplierComparisonEntry] = Field(min_length=2)
 
-            if result is None:
-                raise ValueError(
-                    f"Evidence {evidence_id} does not exist"
-                )
+    @model_validator(mode="after")
+    def validate_unique_suppliers(self):
+        supplier_ids = [
+            entry.supplier_id
+            for entry in self.suppliers
+        ]
 
-            if result.supplier_id != supplier_id:
-                raise ValueError(
-                    f"Evidence {evidence_id} belongs to another supplier"
-                )
+        if len(supplier_ids) != len(set(supplier_ids)):
+            raise ValueError(
+                "A supplier cannot appear more than once in a comparison"
+            )
+
+        return self

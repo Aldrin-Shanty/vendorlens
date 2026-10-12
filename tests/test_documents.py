@@ -8,8 +8,10 @@ from sqlalchemy import select
 from vendorlens.api.main import app
 from vendorlens.db.models.chunk import Chunk
 from vendorlens.services.retrieval import semantic_search
-from vendorlens.services.structured_output import GroundedAnswer
-from vendorlens.services.supplier_comparison import FactEvidence, SupplierFacts, validate_supplier_evidence
+from vendorlens.services.schemas.structured_output import GroundedAnswer
+from vendorlens.services.schemas.supplier_comparison import FactEvidence, SupplierFacts
+from vendorlens.services.evidence_validation import validate_supplier_evidence
+
 
 load_dotenv()
 

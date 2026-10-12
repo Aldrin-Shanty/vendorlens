@@ -2,8 +2,8 @@ import httpx
 
 from pydantic import ValidationError
 
-from vendorlens.services.structured_output import GroundedAnswer
-from vendorlens.services.supplier_comparison import SupplierFacts
+from vendorlens.services.schemas.structured_output import GroundedAnswer
+from vendorlens.services.schemas.supplier_comparison import SupplierFacts
 
 LLM_URL = "http://127.0.0.1:8080/v1/chat/completions"
 

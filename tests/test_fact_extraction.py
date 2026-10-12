@@ -4,7 +4,7 @@ import pytest
 
 from vendorlens.services import fact_extraction
 from vendorlens.services.retrieval import SearchResult
-from vendorlens.services.supplier_comparison import FactEvidence, SupplierFacts
+from vendorlens.services.schemas.supplier_comparison import FactEvidence, SupplierFacts
 
 
 def make_search_result(
