@@ -8,6 +8,7 @@ from vendorlens.db.models.supplier import Supplier
 from vendorlens.services.fact_extraction import extract_facts_for_supplier
 from vendorlens.services.schemas.supplier_comparison import SupplierComparison, SupplierComparisonEntry
 from vendorlens.services.errors import SupplierSelectionError
+from vendorlens.services.evidence_judgment import judge_supplier_facts
 
 
 def compare_suppliers(
@@ -17,6 +18,8 @@ def compare_suppliers(
 ) -> SupplierComparison:
     if len(supplier_ids) < 2:
         raise SupplierSelectionError("At least two suppliers are required")
+    if len(supplier_ids) > 8:
+        raise SupplierSelectionError("At most eight suppliers can be compared")
     if len(supplier_ids) != len(set(supplier_ids)):
         raise SupplierSelectionError("Duplicate supplier IDs are not allowed")
 
@@ -56,6 +59,7 @@ def compare_suppliers(
                 supplier_id=supplier_id,
                 facts=extraction.facts,
                 evidence=extraction.evidence,
+                judgment=judge_supplier_facts(extraction.facts, extraction.evidence),
             )
         )
 

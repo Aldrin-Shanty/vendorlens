@@ -1,0 +1,12 @@
+{
+  "run_at_utc": "2026-10-14T06:18:44.800474+00:00",
+  "scope": "Four synthetic smoke cases; not a calibrated quality evaluation",
+  "cases": [
+    {
+      "case": "supported",
+      "error": "TypeSafe evidence judgment is unavailable",
+      "http_status": 401
+    }
+  ],
+  "passed": false
+}

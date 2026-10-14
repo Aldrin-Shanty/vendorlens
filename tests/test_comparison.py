@@ -12,7 +12,7 @@ from vendorlens.services import comparison
 from vendorlens.services.errors import SupplierSelectionError
 from vendorlens.services.fact_extraction import SupplierExtractionResult
 from vendorlens.services.schemas.supplier_comparison import (
-    EvidenceReference, FactEvidence, SupplierFacts,
+    EvidenceJudgment, EvidenceReference, FactEvidence, SupplierFacts,
 )
 
 
@@ -50,16 +50,26 @@ def test_comparison_preserves_facts_and_provenance(db, monkeypatch):
         )
 
     monkeypatch.setattr(comparison, "extract_facts_for_supplier", fake_extract)
+    judgment_calls = []
+
+    def fake_judge(facts, evidence):
+        judgment_calls.append(facts.supplier_name)
+        assert evidence == {2: reference}
+        return EvidenceJudgment(status="checked", model="MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli")
+
+    monkeypatch.setattr(comparison, "judge_supplier_facts", fake_judge)
     supplier_ids = [supplier.id for supplier in reversed(suppliers)]
     result = comparison.compare_suppliers(db, event.id, supplier_ids)
 
     assert calls == supplier_ids
+    assert judgment_calls == ["HP", "Dell"]
     assert [entry.supplier_id for entry in result.suppliers] == supplier_ids
     assert [entry.facts.supplier_name for entry in result.suppliers] == ["HP", "Dell"]
     for entry in result.suppliers:
         assert entry.facts.warranty_evidence is not None
         assert entry.facts.warranty_evidence.evidence_ids == [2]
         assert entry.evidence == {2: reference}
+        assert entry.judgment.status == "checked"
 
 
 def test_comparison_rejects_cross_event_supplier_before_extraction(db, monkeypatch):
@@ -85,3 +95,8 @@ def test_comparison_rejects_invalid_selection(duplicate):
     supplier_ids = [supplier_id, supplier_id] if duplicate else [supplier_id]
     with pytest.raises(SupplierSelectionError):
         comparison.compare_suppliers(Mock(spec=Session), uuid.uuid4(), supplier_ids)
+
+
+def test_comparison_rejects_supplier_budget():
+    with pytest.raises(SupplierSelectionError, match="At most eight"):
+        comparison.compare_suppliers(Mock(spec=Session), uuid.uuid4(), [uuid.uuid4() for _ in range(9)])

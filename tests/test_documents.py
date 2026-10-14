@@ -449,3 +449,30 @@ def test_semantic_search_excludes_other_suppliers(db, temp_storage):
         str(result.supplier_id) == dell_id
         for result in hp_results
     )
+
+
+def test_semantic_search_excludes_other_events(db, temp_storage):
+    proposal = create_proposal()
+    other_event = client.post("/procurement-events", json={"title": "Different event"})
+    assert other_event.status_code == 201
+    other_proposal = client.post("/proposals", json={
+        "supplier_id": proposal["supplier_id"],
+        "procurement_event_id": other_event.json()["id"],
+    })
+    assert other_proposal.status_code == 201
+    upload = client.post(
+        f"/proposals/{other_proposal.json()['id']}/documents",
+        files={"file": ("other-event.pdf", sample_pdf_bytes(), "application/pdf")},
+    )
+    assert upload.status_code == 201
+    own_results = semantic_search(
+        db, procurement_event_id=proposal["procurement_event_id"],
+        query="warranty", supplier_id=proposal["supplier_id"],
+    )
+    assert own_results == []
+    other_results = semantic_search(
+        db, procurement_event_id=other_event.json()["id"],
+        query="warranty", supplier_id=proposal["supplier_id"],
+    )
+    assert other_results
+    assert all(result.filename == "other-event.pdf" for result in other_results)

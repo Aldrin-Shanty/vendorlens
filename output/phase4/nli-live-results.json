@@ -1,0 +1,91 @@
+{
+  "run_at_utc": "2026-10-14T06:29:29.258082+00:00",
+  "scope": "Four synthetic NLI smoke cases; not a calibrated evaluation",
+  "cases": [
+    {
+      "case": "supported",
+      "expected": "supports",
+      "matched": true,
+      "result": {
+        "model": "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli",
+        "revision": "6f5cf0a2b59cabb106aca4c287eed12e357e90eb",
+        "answers": {
+          "warranty_years": {
+            "choice": "supports",
+            "probabilities": {
+              "supports": 0.99560546875,
+              "insufficient": 0.00371551513671875,
+              "contradicts": 0.0006799697875976562
+            },
+            "confidence": 0.99560546875
+          }
+        },
+        "input_tokens": 15
+      }
+    },
+    {
+      "case": "contradicted",
+      "expected": "contradicts",
+      "matched": true,
+      "result": {
+        "model": "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli",
+        "revision": "6f5cf0a2b59cabb106aca4c287eed12e357e90eb",
+        "answers": {
+          "warranty_years": {
+            "choice": "contradicts",
+            "probabilities": {
+              "supports": 0.0002486705780029297,
+              "insufficient": 0.0007014274597167969,
+              "contradicts": 0.9990234375
+            },
+            "confidence": 0.9990234375
+          }
+        },
+        "input_tokens": 20
+      }
+    },
+    {
+      "case": "ambiguous",
+      "expected": "insufficient",
+      "matched": true,
+      "result": {
+        "model": "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli",
+        "revision": "6f5cf0a2b59cabb106aca4c287eed12e357e90eb",
+        "answers": {
+          "warranty_years": {
+            "choice": "insufficient",
+            "probabilities": {
+              "supports": 0.000492095947265625,
+              "insufficient": 0.978515625,
+              "contradicts": 0.0208282470703125
+            },
+            "confidence": 0.978515625
+          }
+        },
+        "input_tokens": 17
+      }
+    },
+    {
+      "case": "missing",
+      "expected": "insufficient",
+      "matched": true,
+      "result": {
+        "model": "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli",
+        "revision": "6f5cf0a2b59cabb106aca4c287eed12e357e90eb",
+        "answers": {
+          "warranty_years": {
+            "choice": "insufficient",
+            "probabilities": {
+              "supports": 0.0004811286926269531,
+              "insufficient": 0.9990234375,
+              "contradicts": 0.0004260540008544922
+            },
+            "confidence": 0.9990234375
+          }
+        },
+        "input_tokens": 16
+      }
+    }
+  ],
+  "passed": true
+}

@@ -31,6 +31,12 @@ TestSessionLocal = sessionmaker(
 )
 
 @pytest.fixture(autouse=True)
+def disable_model_judgment(monkeypatch):
+    # Unit tests must not load models based on a developer's environment.
+    monkeypatch.setenv("NLI_EVIDENCE_JUDGMENT_ENABLED", "false")
+
+
+@pytest.fixture(autouse=True)
 def reset_database():
     Base.metadata.drop_all(bind=test_engine)
     Base.metadata.create_all(bind=test_engine)

@@ -250,3 +250,54 @@ def test_compare_requires_api_key():
         )
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid or missing API key"
+
+
+def test_compare_rejects_supplier_budget(client):
+    event_id = create_event(client)
+    response = client.post(
+        f"/procurement-events/{event_id}/compare",
+        json={"supplier_ids": [str(uuid.uuid4()) for _ in range(9)]},
+    )
+    assert response.status_code == 422
+
+
+def test_comparison_service_through_api_preserves_provenance(client, monkeypatch):
+    from vendorlens.services import comparison as comparison_service
+    from vendorlens.services.fact_extraction import SupplierExtractionResult
+    from vendorlens.services.schemas.supplier_comparison import EvidenceReference, FactEvidence
+
+    event_id = create_event(client)
+    supplier_ids = []
+    for name in ("Synthetic Dell", "Synthetic HP"):
+        supplier_response = client.post("/suppliers", json={"name": name})
+        assert supplier_response.status_code == 201
+        supplier_id = supplier_response.json()["id"]
+        supplier_ids.append(supplier_id)
+        proposal = client.post("/proposals", json={
+            "supplier_id": supplier_id, "procurement_event_id": event_id,
+        })
+        assert proposal.status_code == 201
+
+    chunk_ids = {}
+
+    def fake_extract(db, procurement_event_id, supplier_id, supplier_name):
+        assert str(procurement_event_id) == event_id
+        chunk_id = uuid.uuid4()
+        chunk_ids[str(supplier_id)] = str(chunk_id)
+        return SupplierExtractionResult(
+            facts=SupplierFacts(supplier_name=supplier_name, warranty_years=3,
+                                warranty_evidence=FactEvidence(evidence_ids=[2])),
+            evidence={2: EvidenceReference(chunk_id=chunk_id, document_version_id=uuid.uuid4(),
+                                          filename="synthetic.pdf", page_number=2, text="Warranty: 3 years.")},
+        )
+
+    monkeypatch.setattr(comparison_service, "extract_facts_for_supplier", fake_extract)
+    response = client.post(f"/procurement-events/{event_id}/compare", json={"supplier_ids": supplier_ids})
+    assert response.status_code == 200
+    entries = response.json()["suppliers"]
+    assert [entry["supplier_id"] for entry in entries] == supplier_ids
+    for entry in entries:
+        assert entry["facts"]["warranty_evidence"]["evidence_ids"] == [2]
+        assert set(entry["evidence"]) == {"2"}
+        assert entry["evidence"]["2"]["chunk_id"] == chunk_ids[entry["supplier_id"]]
+        assert entry["judgment"]["status"] == "not_checked"

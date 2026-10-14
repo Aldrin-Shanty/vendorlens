@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class CompareSuppliersRequest(BaseModel):
-    supplier_ids: list[uuid.UUID] = Field(min_length=2)
+    supplier_ids: list[uuid.UUID] = Field(min_length=2, max_length=8)
 
     @model_validator(mode="after")
     def validate_unique_suppliers(self):

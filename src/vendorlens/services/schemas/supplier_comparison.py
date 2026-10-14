@@ -1,6 +1,10 @@
 import uuid
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, model_validator
+
+Relation = Literal["supports", "contradicts", "insufficient"]
+Probability = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 
 class FactEvidence(BaseModel):
     evidence_ids: list[int] = Field(min_length=1)
@@ -53,9 +57,26 @@ class EvidenceReference(BaseModel):
     text: str
 
 
+class FactJudgment(BaseModel):
+    relation: Relation
+    confidence: Probability
+    probabilities: dict[Relation, Probability]
+    requires_review: bool
+
+
+class EvidenceJudgment(BaseModel):
+    status: Literal["not_checked", "checked"] = "not_checked"
+    model: str | None = None
+    revision: str | None = None
+    facts: dict[str, FactJudgment] = Field(default_factory=dict)
+    input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+
+
 class SupplierComparisonEntry(BaseModel):
     supplier_id: uuid.UUID
     facts: SupplierFacts
+    judgment: EvidenceJudgment = Field(default_factory=EvidenceJudgment)
 
     evidence: dict[int, EvidenceReference] = Field(
         default_factory=dict
