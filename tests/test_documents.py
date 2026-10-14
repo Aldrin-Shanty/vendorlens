@@ -9,8 +9,6 @@ from vendorlens.api.main import app
 from vendorlens.db.models.chunk import Chunk
 from vendorlens.services.retrieval import semantic_search
 from vendorlens.services.schemas.structured_output import GroundedAnswer
-from vendorlens.services.schemas.supplier_comparison import FactEvidence, SupplierFacts
-from vendorlens.services.evidence_validation import validate_supplier_evidence
 
 
 load_dotenv()
@@ -364,29 +362,6 @@ def test_ask_rejects_invalid_evidence_ids(
     )
 
     assert len(body["retrieved_evidence"]) >= 1
-
-def validate_supplier_evidence(
-    facts: SupplierFacts,
-    evidence_count: int,
-) -> None:
-    valid_ids = set(range(1, evidence_count + 1))
-
-    evidence_fields = [
-        facts.unit_price_evidence,
-        facts.warranty_evidence,
-        facts.delivery_evidence,
-    ]
-
-    for evidence in evidence_fields:
-        if evidence is None:
-            continue
-
-        referenced_ids = set(evidence.evidence_ids)
-
-        if not referenced_ids.issubset(valid_ids):
-            raise ValueError(
-                "Supplier facts reference invalid evidence IDs"
-            )
 
 def test_semantic_search_excludes_other_suppliers(db, temp_storage):
     # Create the first supplier, event, and proposal

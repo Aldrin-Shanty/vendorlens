@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from vendorlens.api.dependencies import get_db
 from vendorlens.core.security import require_api_key
 from vendorlens.db.models.procurement_event import ProcurementEvent
-from vendorlens.api.schemas.search import SearchRequest, SearchResultRead
 from vendorlens.services.retrieval import semantic_search
 from vendorlens.api.schemas.search import AskRequest, AskResponse, CitationRead, SearchRequest, SearchResultRead
 from vendorlens.services.rag import answer_question

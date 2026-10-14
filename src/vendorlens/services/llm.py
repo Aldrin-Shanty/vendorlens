@@ -1,9 +1,8 @@
 import httpx
 
-from pydantic import ValidationError
-
 from vendorlens.services.schemas.structured_output import GroundedAnswer
 from vendorlens.services.schemas.supplier_comparison import SupplierFacts
+from vendorlens.services.errors import AIOutputError
 
 LLM_URL = "http://127.0.0.1:8080/v1/chat/completions"
 
@@ -73,7 +72,9 @@ def extract_supplier_facts(prompt: str) -> SupplierFacts:
 
     response.raise_for_status()
 
-    data = response.json()
-    content = data["choices"][0]["message"]["content"]
-
-    return SupplierFacts.model_validate_json(content)
+    try:
+        data = response.json()
+        content = data["choices"][0]["message"]["content"]
+        return SupplierFacts.model_validate_json(content)
+    except (ValueError, KeyError, IndexError, TypeError) as exc:
+        raise AIOutputError("The AI provider returned invalid supplier facts") from exc

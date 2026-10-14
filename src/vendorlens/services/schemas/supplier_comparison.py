@@ -2,7 +2,6 @@ import uuid
 
 from pydantic import BaseModel, Field, model_validator
 
-
 class FactEvidence(BaseModel):
     evidence_ids: list[int] = Field(min_length=1)
 
@@ -46,12 +45,21 @@ class SupplierFacts(BaseModel):
 
         return self
 
+class EvidenceReference(BaseModel):
+    chunk_id: uuid.UUID
+    document_version_id: uuid.UUID
+    filename: str
+    page_number: int
+    text: str
+
 
 class SupplierComparisonEntry(BaseModel):
     supplier_id: uuid.UUID
     facts: SupplierFacts
 
-
+    evidence: dict[int, EvidenceReference] = Field(
+        default_factory=dict
+    )
 class SupplierComparison(BaseModel):
     procurement_event_id: uuid.UUID
     suppliers: list[SupplierComparisonEntry] = Field(min_length=2)

@@ -2,7 +2,7 @@ import uuid
 
 from vendorlens.services.retrieval import SearchResult
 from vendorlens.services.schemas.supplier_comparison import SupplierFacts
-
+from vendorlens.services.errors import EvidenceValidationError
 
 def validate_supplier_evidence(
     facts: SupplierFacts,
@@ -28,11 +28,11 @@ def validate_supplier_evidence(
             result = evidence_by_id.get(evidence_id)
 
             if result is None:
-                raise ValueError(
+                raise EvidenceValidationError(
                     f"Evidence {evidence_id} does not exist"
                 )
 
             if result.supplier_id != supplier_id:
-                raise ValueError(
+                raise EvidenceValidationError(
                     f"Evidence {evidence_id} belongs to another supplier"
                 )

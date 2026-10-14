@@ -9,6 +9,7 @@ from vendorlens.api.routes.procurement_event import router as procurement_event_
 from vendorlens.api.routes.proposal import router as proposal_router
 from vendorlens.api.routes.documents import router as documents_router
 from vendorlens.api.routes.search import router as search_router
+from vendorlens.api.routes.comparison import router as comparison_router
 
 app = FastAPI(title="VendorLens")
 app.include_router(supplier_router)
@@ -16,6 +17,7 @@ app.include_router(procurement_event_router)
 app.include_router(proposal_router)
 app.include_router(documents_router)
 app.include_router(search_router)
+app.include_router(comparison_router)
 
 @app.middleware("http")
 async def add_request_id(

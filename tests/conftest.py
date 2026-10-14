@@ -1,5 +1,6 @@
 import os
 import pytest
+from fastapi.testclient import TestClient
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -9,6 +10,7 @@ from vendorlens.services.storage import LocalFileStorage
 from vendorlens.api.dependencies import get_db
 from vendorlens.api.main import app
 from vendorlens.db.base import Base
+from vendorlens.core.security import API_KEY
 
 TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 
@@ -36,6 +38,14 @@ def reset_database():
     yield
 
     Base.metadata.drop_all(bind=test_engine)
+
+@pytest.fixture
+def client():
+    if API_KEY is None:
+        raise RuntimeError("API_KEY environment variable is not set")
+    with TestClient(app, headers={"X-API-Key": API_KEY}) as test_client:
+        yield test_client
+
 
 @pytest.fixture
 def db():
