@@ -7,7 +7,7 @@ import torch
 
 from vendorlens.services import evidence_judgment, nli
 from vendorlens.services.errors import AIOutputError, AIServiceUnavailableError, EvidenceValidationError
-from vendorlens.services.schemas.supplier_comparison import EvidenceReference, FactEvidence, SupplierFacts
+from vendorlens.services.schemas.supplier_comparison import EvidenceReference, FactEvidence, SupplierFacts, Relation
 
 
 @pytest.fixture
@@ -62,7 +62,7 @@ def test_all_nli_labels(runtime, scores, expected):
 
 
 @pytest.mark.parametrize("choice, confidence, review", [("supports", .9, False), ("supports", .5, True), ("contradicts", .9, True), ("insufficient", .9, True)])
-def test_judgment_cited_sources_and_review(monkeypatch, choice, confidence, review):
+def test_judgment_cited_sources_and_review(monkeypatch, choice: Relation, confidence: float, review: bool):
     monkeypatch.setenv("NLI_EVIDENCE_JUDGMENT_ENABLED", "true")
     facts = SupplierFacts(supplier_name="Dell", warranty_years=3, warranty_evidence=FactEvidence(evidence_ids=[2]))
     evidence = {i: EvidenceReference(chunk_id=uuid.uuid4(), document_version_id=uuid.uuid4(), filename="proposal.pdf", page_number=1, text=text) for i, text in [(1, "Uncited"), (2, "Warranty: 3 years")]}

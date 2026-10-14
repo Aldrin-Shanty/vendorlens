@@ -72,7 +72,7 @@ def judge_claims(claims: dict[str, dict]) -> NLIResult:
             except Exception as exc:
                 raise AIServiceUnavailableError("Local NLI model is unavailable; run scripts/verify_nli.py --download") from exc
         tokenizer, model = _runtime
-        answers = {}
+        answers: dict[str, NLIAnswer] = {}
         total_tokens = 0
         for name, claim in claims.items():
             # Evidence is the premise, extracted fact is the hypothesis.
@@ -85,11 +85,11 @@ def judge_claims(claims: dict[str, dict]) -> NLIResult:
             with torch.inference_mode():
                 logits = model(**inputs).logits[0]
                 scores = torch.softmax(logits, dim=-1).tolist()
-            probabilities = {
+            probabilities: dict[Relation, Probability] = {
                 LABELS[str(model.config.id2label[index]).lower()]: float(score)
                 for index, score in enumerate(scores)
             }
-            choice = max(probabilities, key=lambda label: probabilities[label])
+            choice: Relation = max(probabilities, key=lambda label: probabilities[label])
             answers[name] = NLIAnswer(
                 choice=choice, probabilities=probabilities, confidence=probabilities[choice],
             )

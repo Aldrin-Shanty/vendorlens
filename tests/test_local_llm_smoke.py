@@ -1,21 +1,28 @@
-"""Opt-in real llama.cpp smoke test using synthetic evidence only."""
+"""Real llama.cpp smoke test; runs when the configured local server is ready."""
 
-import os
 import uuid
 from unittest.mock import Mock
+from urllib.parse import urlsplit, urlunsplit
 
+import httpx
 import pytest
 from sqlalchemy.orm import Session
 
 from vendorlens.services import fact_extraction
+from vendorlens.services.llm import LLM_URL
 from vendorlens.services.retrieval import SearchResult
 
 
-@pytest.mark.skipif(
-    os.getenv("RUN_LOCAL_LLM_TESTS") != "true",
-    reason="Set RUN_LOCAL_LLM_TESTS=true with llama.cpp running on port 8080",
-)
 def test_real_local_supplier_extraction(monkeypatch):
+    endpoint = urlsplit(LLM_URL)
+    health_url = urlunsplit((endpoint.scheme, endpoint.netloc, "/health", "", ""))
+    try:
+        response = httpx.get(health_url, timeout=2.0)
+    except httpx.RequestError:
+        pytest.skip("Local Qwen server is unavailable")
+    if response.status_code != 200:
+        pytest.skip(f"Local Qwen server is not ready (HTTP {response.status_code})")
+
     supplier_id = uuid.uuid4()
     source = SearchResult(
         chunk_id=uuid.uuid4(), supplier_id=supplier_id, supplier_name="Synthetic Supplier",

@@ -96,13 +96,16 @@ hard execution timeout. Missing models return 503; oversized/invalid output retu
 502. Regression tests use fake models and disable judgment regardless of `.env`.
 Four smoke cases do not establish corpus accuracy or calibrate the threshold.
 
-To exercise real Qwen extraction, start your llama.cpp server on port 8080, then run:
+The Qwen smoke test automatically checks the local server's `/health` endpoint.
+When ready, it runs with the rest of the suite; when unavailable or loading, it
+skips after a health check with a two-second timeout. Once ready, extraction
+errors fail the test rather than being skipped.
+
+Start your llama.cpp server on port 8080, then run:
 
 ```powershell
-$env:RUN_LOCAL_LLM_TESTS = "true"
-uv run pytest -v tests/test_local_llm_smoke.py
-Remove-Item Env:RUN_LOCAL_LLM_TESTS
+uv run pytest -v
 ```
 
-This opt-in smoke test uses synthetic evidence and checks extraction and provenance;
+This smoke test uses synthetic evidence and checks extraction and provenance;
 it does not establish model quality across the procurement corpus.
