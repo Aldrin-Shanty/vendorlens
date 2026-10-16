@@ -263,8 +263,9 @@ def test_compare_rejects_supplier_budget(client):
 
 def test_comparison_service_through_api_preserves_provenance(client, monkeypatch):
     from vendorlens.services import comparison as comparison_service
-    from vendorlens.services.fact_extraction import SupplierExtractionResult
-    from vendorlens.services.schemas.supplier_comparison import EvidenceReference, FactEvidence
+    from vendorlens.services import fact_extraction
+    from vendorlens.services.retrieval import SearchResult
+    from vendorlens.services.schemas.supplier_comparison import FactEvidence
 
     event_id = create_event(client)
     supplier_ids = []
@@ -280,18 +281,23 @@ def test_comparison_service_through_api_preserves_provenance(client, monkeypatch
 
     chunk_ids = {}
 
-    def fake_extract(db, procurement_event_id, supplier_id, supplier_name):
+    def fake_retrieve(db, procurement_event_id, supplier_id):
         assert str(procurement_event_id) == event_id
         chunk_id = uuid.uuid4()
         chunk_ids[str(supplier_id)] = str(chunk_id)
-        return SupplierExtractionResult(
-            facts=SupplierFacts(supplier_name=supplier_name, warranty_years=3,
-                                warranty_evidence=FactEvidence(evidence_ids=[2])),
-            evidence={2: EvidenceReference(chunk_id=chunk_id, document_version_id=uuid.uuid4(),
-                                          filename="synthetic.pdf", page_number=2, text="Warranty: 3 years.")},
-        )
+        return [SearchResult(
+            chunk_id=chunk_id, supplier_id=supplier_id,
+            supplier_name="Synthetic supplier", document_version_id=uuid.uuid4(),
+            filename="synthetic.pdf", page_number=2, text=text, distance=0.1,
+        ) for text in ("Uncited background", "Warranty: 3 years.")]
 
-    monkeypatch.setattr(comparison_service, "extract_facts_for_supplier", fake_extract)
+    def fake_extract(prompt):
+        supplier_name = "Synthetic Dell" if "Supplier: Synthetic Dell" in prompt else "Synthetic HP"
+        return SupplierFacts(supplier_name=supplier_name, warranty_years=3,
+                             warranty_evidence=FactEvidence(evidence_ids=[2]))
+
+    monkeypatch.setattr(comparison_service, "retrieve_supplier_evidence", fake_retrieve)
+    monkeypatch.setattr(fact_extraction, "extract_supplier_facts", fake_extract)
     response = client.post(f"/procurement-events/{event_id}/compare", json={"supplier_ids": supplier_ids})
     assert response.status_code == 200
     entries = response.json()["suppliers"]

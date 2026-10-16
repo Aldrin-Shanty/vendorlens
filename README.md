@@ -56,6 +56,14 @@ Run the test suite:
 
 ### Supplier comparison and evidence judgment
 
+`services/comparison.py::compare_suppliers` is the workflow entry point. Read it
+top to bottom: validate selection, retrieve supplier evidence, extract facts,
+validate identity/citations, build evidence references, judge facts, assemble the
+comparison. Selection is validated for every supplier before retrieval or model
+calls begin. Stage implementations live in `services/fact_extraction.py`; its
+`extract_facts_for_supplier` convenience function uses the same stages for
+standalone extraction and the Qwen smoke test.
+
 `POST /procurement-events/{event_id}/compare` accepts `supplier_ids` containing
 two to eight distinct supplier UUIDs. Every supplier must have a proposal in that
 event. The response includes extracted facts and only their cited source chunks.

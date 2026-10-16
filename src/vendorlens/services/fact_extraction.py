@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 from vendorlens.services.llm import extract_supplier_facts
-from vendorlens.services.retrieval import semantic_search
+from vendorlens.services.retrieval import SearchResult, semantic_search
 from vendorlens.services.schemas.supplier_comparison import SupplierFacts, EvidenceReference
 from vendorlens.services.evidence_validation import validate_supplier_evidence
 from vendorlens.services.errors import AIOutputError, SupplierSelectionError
@@ -14,13 +14,12 @@ class SupplierExtractionResult:
     facts: SupplierFacts
     evidence: dict[int, EvidenceReference]
 
-def extract_facts_for_supplier(
+def retrieve_supplier_evidence(
     db: Session,
     procurement_event_id: uuid.UUID,
     supplier_id: uuid.UUID,
-    supplier_name: str,
-) -> SupplierExtractionResult:
-
+) -> list[SearchResult]:
+    """Retrieve evidence within the requested event and supplier."""
     supplier_results = semantic_search(
         db=db,
         procurement_event_id=procurement_event_id,
@@ -34,6 +33,14 @@ def extract_facts_for_supplier(
             "No proposal evidence found for this supplier"
         )
 
+    return supplier_results
+
+
+def extract_facts_from_evidence(
+    supplier_name: str,
+    supplier_results: list[SearchResult],
+) -> SupplierFacts:
+    """Build the extraction prompt and parse Qwen's structured response."""
     evidence_parts = []
 
     for index, result in enumerate(supplier_results, start=1):
@@ -81,7 +88,16 @@ Evidence:
 """
 
     facts = extract_supplier_facts(prompt)
+    return facts
 
+
+def validate_supplier_facts(
+    facts: SupplierFacts,
+    supplier_id: uuid.UUID,
+    supplier_name: str,
+    supplier_results: list[SearchResult],
+) -> None:
+    """Check supplier identity and cited source ownership before judgment."""
     if facts.supplier_name != supplier_name:
         raise AIOutputError(
             "Extracted supplier name does not match the requested supplier"
@@ -93,6 +109,12 @@ Evidence:
         results=supplier_results,
     )
 
+
+def build_evidence_references(
+    facts: SupplierFacts,
+    supplier_results: list[SearchResult],
+) -> dict[int, EvidenceReference]:
+    """Keep only cited sources without changing their original evidence IDs."""
     cited_ids: set[int] = set()
 
     for evidence_field in (
@@ -118,7 +140,18 @@ Evidence:
         if index in cited_ids
     }
 
-    return SupplierExtractionResult(
-        facts=facts,
-        evidence=evidence_map,
-    )
+    return evidence_map
+
+
+def extract_facts_for_supplier(
+    db: Session,
+    procurement_event_id: uuid.UUID,
+    supplier_id: uuid.UUID,
+    supplier_name: str,
+) -> SupplierExtractionResult:
+    """Convenience entry point for standalone extraction, including the smoke test."""
+    sources = retrieve_supplier_evidence(db, procurement_event_id, supplier_id)
+    facts = extract_facts_from_evidence(supplier_name, sources)
+    validate_supplier_facts(facts, supplier_id, supplier_name, sources)
+    evidence = build_evidence_references(facts, sources)
+    return SupplierExtractionResult(facts=facts, evidence=evidence)
