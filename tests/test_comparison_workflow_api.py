@@ -507,7 +507,7 @@ def test_review_requires_api_key(
     ) == calls_before
 
 
-def test_workflow_names_ignore_supplier_order_and_refresh_deleted_numbers(client, workflow_api):
+def test_workflow_creation_refreshes_numbers_after_deletion(client, workflow_api):
     event_id, suppliers = create_comparison_inputs(client)
     base = f"/procurement-events/{event_id}/comparison-workflows"
     first = client.post(base, json={"supplier_ids": suppliers}).json()
@@ -606,7 +606,7 @@ def test_legacy_postgres_runs_get_names_and_deletion_is_atomic(client, db, monke
                 saver.delete_thread(str(workflow_id))
 
 
-def test_deleting_middle_run_renumbers_only_its_supplier_group(client, workflow_api):
+def test_creation_and_middle_deletion_keep_group_numbers_consecutive(client, workflow_api):
     event_id, suppliers = create_comparison_inputs(client)
     base = f"/procurement-events/{event_id}/comparison-workflows"
     runs = [client.post(base, json={"supplier_ids": suppliers}).json() for _ in range(3)]
@@ -624,3 +624,7 @@ def test_deleting_middle_run_renumbers_only_its_supplier_group(client, workflow_
     assert client.get(other_base).json()[0]["name"] == other["name"]
     next_run = client.post(base, json={"supplier_ids": suppliers[::-1]}).json()
     assert next_run["sequence_number"] == 3
+    refreshed = client.get(f"{base}/{runs[2]['workflow_id']}").json()
+    assert refreshed["sequence_number"] == 2
+    assert refreshed["name"].endswith("(2)")
+    assert refreshed["review_issues"] == runs[2]["review_issues"]

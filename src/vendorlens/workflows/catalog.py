@@ -8,7 +8,7 @@ from typing import cast
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.postgres import PostgresSaver
 from pydantic import BaseModel
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -17,7 +17,7 @@ from vendorlens.db.models.procurement_event import ProcurementEvent
 from vendorlens.db.models.supplier import Supplier
 from vendorlens.services.data_locks import lock_records
 from vendorlens.services.errors import DeletionConfirmationRequired, WorkflowNotFoundError
-from vendorlens.workflows.numbering import renumber_workflows
+from vendorlens.workflows.numbering import renumber_workflows, delete_workflow_records
 from vendorlens.workflows.checkpoint import delete_comparison_threads
 from vendorlens.workflows.state import ComparisonWorkflowState, WorkflowStatus
 
@@ -97,6 +97,8 @@ def synchronize_catalog(db: Session, checkpointer: BaseCheckpointSaver, event_id
 
 def prepare_workflow(db: Session, checkpointer: BaseCheckpointSaver, event_id: uuid.UUID, supplier_ids: list[uuid.UUID]) -> ComparisonWorkflowRecord:
     synchronize_catalog(db, checkpointer, event_id)
+    supplier_key = hashlib.sha256(",".join(sorted({str(value) for value in supplier_ids})).encode()).hexdigest()
+    renumber_workflows(db, event_id, supplier_key)
     record = register_workflow(db, uuid.uuid4(), event_id, supplier_ids)
     db.commit()
     return record
@@ -130,6 +132,5 @@ def delete_workflows(db: Session, checkpointer: BaseCheckpointSaver, *, event_id
     else:
         for value in ids:
             checkpointer.delete_thread(str(value))
-        db.execute(delete(ComparisonWorkflowRecord).where(ComparisonWorkflowRecord.id.in_(ids)))
-        renumber_workflows(db)
+        delete_workflow_records(db, ids)
     db.commit()

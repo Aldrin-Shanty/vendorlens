@@ -288,7 +288,7 @@ model execution finishes before removing saved evidence.
 Run `uv run alembic upgrade head` before starting the updated API. The workflow
 catalog migration adds names and persistent per-event/supplier-set run counters.
 Names follow `Event title — Supplier A + Supplier B (1)`; supplier order does not
-change the group, and deleting runs renumbers the remaining runs consecutively. Existing saved
+change the group, and creating or deleting a comparison keeps its group numbered consecutively. Existing saved
 comparisons receive names automatically when listed or opened.
 
 - `GET /procurement-events/{event_id}/comparison-workflows`: named history for an event.

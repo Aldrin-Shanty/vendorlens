@@ -3,15 +3,15 @@ from contextlib import contextmanager
 
 from langgraph.checkpoint.postgres import PostgresSaver
 from sqlalchemy.engine import make_url
-from sqlalchemy import delete, select, text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 from psycopg import Connection
 from psycopg.rows import DictRow
 from typing import cast
 import uuid
 from vendorlens.db.models.comparison_workflow import ComparisonWorkflowRecord
-from vendorlens.workflows.numbering import renumber_workflows
 from vendorlens.services.data_locks import lock_records
+from vendorlens.workflows.numbering import delete_workflow_records
 
 
 @contextmanager
@@ -81,6 +81,4 @@ def delete_comparison_threads(db: Session, thread_ids: list[str]) -> None:
     saver = PostgresSaver(cast(Connection[DictRow], db.connection().connection.driver_connection))
     for thread_id in thread_ids:
         saver.delete_thread(thread_id)
-    db.execute(delete(ComparisonWorkflowRecord).where(ComparisonWorkflowRecord.id.in_([uuid.UUID(value) for value in thread_ids])))
-
-    renumber_workflows(db)
+    delete_workflow_records(db, [uuid.UUID(value) for value in thread_ids])

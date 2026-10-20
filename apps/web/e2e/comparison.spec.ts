@@ -438,7 +438,14 @@ for (const all of [false, true]) {
     await mockApi(page);
     let deletes = 0;
     await page.route("**/api/**", async (route) => {
-      if (deletes && route.request().method() === "GET" && new URL(route.request().url()).pathname.endsWith("/comparison-workflows")) return route.fulfill({json: []});
+      if (
+        deletes &&
+        route.request().method() === "GET" &&
+        new URL(route.request().url()).pathname.endsWith(
+          "/comparison-workflows",
+        )
+      )
+        return route.fulfill({ json: [] });
       if (route.request().method() !== "DELETE") return route.fallback();
       deletes++;
       expect(new URL(route.request().url()).searchParams.get("confirm")).toBe(
@@ -528,4 +535,38 @@ test("failed workflow deletion keeps the saved result and displays the error", a
       exact: true,
     }),
   ).toBeVisible();
+});
+
+test("demo keeps numbering consecutive on deletion and creation", async ({
+  page,
+}) => {
+  await page.route("**/api/**", (route) => route.abort("connectionrefused"));
+  await page.goto("/");
+  await page
+    .locator("nav")
+    .getByRole("button", { name: "Comparisons", exact: true })
+    .click();
+  await page.getByRole("checkbox", { name: "Northstar Technologies" }).check();
+  await page.getByRole("checkbox", { name: "Acme Infrastructure" }).check();
+  for (let i = 0; i < 3; i++)
+    await page
+      .getByRole("button", { name: "Preview comparison", exact: true })
+      .click();
+  const rows = page.locator(".saved-workflow-row");
+  const middle = rows.filter({
+    has: page.locator("strong", { hasText: /\(2\)$/ }),
+  });
+  await middle.getByRole("button", { name: /^Delete / }).click();
+  await page
+    .getByRole("button", { name: "Confirm deletion", exact: true })
+    .click();
+  await expect(rows.locator("strong")).toHaveText([/\(2\)$/, /\(1\)$/]);
+  await page
+    .getByRole("button", { name: "Preview comparison", exact: true })
+    .click();
+  await expect(rows.locator("strong")).toHaveText([
+    /\(3\)$/,
+    /\(2\)$/,
+    /\(1\)$/,
+  ]);
 });

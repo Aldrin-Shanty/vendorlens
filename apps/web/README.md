@@ -78,7 +78,8 @@ result and reports the conflict.
 Saved workflows are listed for the selected event, including runs created in other
 browsers. Names use `Event title — Supplier A + Supplier B (1)`. Supplier order
 does not affect the counter; each event and supplier set has its own sequence.
-Remaining runs are renumbered after deletion; deleting all resets numbering to 1. Names are snapshots of the titles at
+Creation and deletion keep each event/supplier group numbered consecutively.
+Creating a comparison assigns the next number (or 1 for an empty group). Names are snapshots of the titles at
 creation. Existing saved runs receive names automatically, oldest first.
 
 Use a row to reopen a comparison or its trash button to delete it after confirmation.

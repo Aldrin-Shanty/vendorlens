@@ -196,8 +196,21 @@ export function ComparisonWorkspace({
     setNotice("");
     try {
       const group = [...selection].sort().join(",");
-      if (demo)
-        demoSequences.current[group] = (demoSequences.current[group] || 0) + 1;
+      if (demo) {
+        const matching = [...demoRuns.current.values()]
+          .filter((run) => [...run.supplier_ids].sort().join(",") === group)
+          .sort((a, b) => a.sequence_number - b.sequence_number);
+        matching.forEach((run, index) => {
+          const number = index + 1;
+          demoRuns.current.set(run.workflow_id, {
+            ...run,
+            sequence_number: number,
+            name: run.name.replace(/ \(\d+\)$/, ` (${number})`),
+          });
+        });
+        demoSequences.current[group] = matching.length + 1;
+        setRuns([...demoRuns.current.values()].reverse());
+      }
       const result = demo
         ? createDemoComparison(
             eventId,
@@ -207,6 +220,7 @@ export function ComparisonWorkspace({
           )
         : await startComparison(eventId, selection);
       accept(result);
+      if (!demo && mounted.current) setListRevision((value) => value + 1);
     } catch (err) {
       if (mounted.current)
         setError(
@@ -283,23 +297,27 @@ export function ComparisonWorkspace({
       if (demo) {
         if (target.kind === "all") demoRuns.current.clear();
         else demoRuns.current.delete(target.run.workflow_id);
-        demoSequences.current = {};
+        const counts: Record<string, number> = {};
         const remaining = [...demoRuns.current.values()].sort(
           (a, b) => a.sequence_number - b.sequence_number,
         );
         for (const run of remaining) {
           const key = [...run.supplier_ids].sort().join(",");
-          const number = (demoSequences.current[key] || 0) + 1;
-          demoSequences.current[key] = number;
-          run.sequence_number = number;
-          run.name = run.name.replace(/ \(\d+\)$/, ` (${number})`);
+          const number = (counts[key] || 0) + 1;
+          counts[key] = number;
+          demoRuns.current.set(run.workflow_id, {
+            ...run,
+            sequence_number: number,
+            name: run.name.replace(/ \(\d+\)$/, ` (${number})`),
+          });
         }
-        setRuns(remaining.reverse());
+        demoSequences.current = counts;
         setWorkflow((current) =>
           current
             ? { ...(demoRuns.current.get(current.workflow_id) || current) }
             : current,
         );
+        setRuns([...demoRuns.current.values()].reverse());
       } else {
         setRuns((previous) =>
           target.kind === "all"
