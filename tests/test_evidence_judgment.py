@@ -68,7 +68,7 @@ def test_judgment_preserves_cited_sources_and_scores(monkeypatch, choice: Relati
     evidence = {i: EvidenceReference(chunk_id=uuid.uuid4(), document_version_id=uuid.uuid4(), filename="proposal.pdf", page_number=1, text=text) for i, text in [(1, "Uncited"), (2, "Warranty: 3 years")]}
     def fake_judge(claims):
         assert claims["warranty_years"]["evidence"] == [{"id": 2, "text": "Warranty: 3 years"}]
-        assert claims["warranty_years"]["claim"] == "The warranty is 3.0 years."
+        assert claims["warranty_years"]["claim"] == "The warranty is 3 years."
         return nli.NLIResult(answers={"warranty_years": nli.NLIAnswer(choice=choice, confidence=confidence, probabilities={choice: confidence})}, input_tokens=20)
     monkeypatch.setattr(evidence_judgment, "judge_claims", fake_judge)
     result = evidence_judgment.judge_supplier_facts(facts, evidence)
@@ -79,6 +79,59 @@ def test_judgment_preserves_cited_sources_and_scores(monkeypatch, choice: Relati
     assert result.revision == nli.REVISION
     assert result.output_tokens == 0
     assert facts.warranty_years == 3
+
+
+@pytest.mark.parametrize(
+    "price, warranty, delivery, price_text, warranty_text",
+    [
+        (1200.0, 3.0, 14, "1200", "3"),
+        (1050.0, 1.0, 7, "1050", "1"),
+        (0.0, 0.0, 0, "0", "0"),
+        (1199.95, 2.5, 21, "1199.95", "2.5"),
+        (1234.56789123, 1.23456789, 30, "1234.56789123", "1.23456789"),
+    ],
+)
+def test_numeric_claims_normalize_whole_values_without_rounding_or_mutating_facts(
+    monkeypatch, price, warranty, delivery, price_text, warranty_text
+):
+    monkeypatch.setenv("NLI_EVIDENCE_JUDGMENT_ENABLED", "true")
+    facts = SupplierFacts(
+        supplier_name="Synthetic supplier",
+        unit_price=price,
+        currency="USD",
+        unit_price_evidence=FactEvidence(evidence_ids=[1]),
+        warranty_years=warranty,
+        warranty_evidence=FactEvidence(evidence_ids=[1]),
+        delivery_days=delivery,
+        delivery_evidence=FactEvidence(evidence_ids=[1]),
+    )
+    before = facts.model_dump()
+    source = EvidenceReference(
+        chunk_id=uuid.uuid4(),
+        document_version_id=uuid.uuid4(),
+        filename="synthetic.pdf",
+        page_number=1,
+        text=(
+            f"The unit price is {price_text} USD. "
+            f"The warranty is {warranty_text} years. "
+            f"Delivery takes {delivery} days."
+        ),
+    )
+    judge = Mock(return_value=nli.NLIResult(answers={}, input_tokens=0))
+    monkeypatch.setattr(evidence_judgment, "judge_claims", judge)
+
+    evidence_judgment.judge_supplier_facts(facts, {1: source})
+
+    judge.assert_called_once()
+    claims = judge.call_args.args[0]
+    assert {name: claim["claim"] for name, claim in claims.items()} == {
+        "unit_price": f"The unit price is {price_text} USD.",
+        "warranty_years": f"The warranty is {warranty_text} years.",
+        "delivery_days": f"Delivery takes {delivery} days.",
+    }
+    for claim in claims.values():
+        assert claim["evidence"] == [{"id": 1, "text": source.text}]
+    assert facts.model_dump() == before
 
 
 @pytest.mark.parametrize("enabled", ["false", "true"])

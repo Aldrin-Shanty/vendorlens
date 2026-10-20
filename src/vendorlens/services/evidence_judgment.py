@@ -29,11 +29,18 @@ def judge_supplier_facts(
             continue
         if any(evidence_id not in evidence for evidence_id in citations.evidence_ids):
             raise EvidenceValidationError(f"Missing source evidence for {name}")
+        # Equivalent forms such as 1200 and 1200.0 can confuse the NLI model.
+        # Remove only redundant fractional zeros; preserve non-integral values.
+        value_text = (
+            str(int(value))
+            if isinstance(value, float) and value.is_integer()
+            else str(value)
+        )
         claims[name] = {
             "claim": {
-                "unit_price": f"The unit price is {value} {unit}.",
-                "warranty_years": f"The warranty is {value} years.",
-                "delivery_days": f"Delivery takes {value} days.",
+                "unit_price": f"The unit price is {value_text} {unit}.",
+                "warranty_years": f"The warranty is {value_text} years.",
+                "delivery_days": f"Delivery takes {value_text} days.",
             }[name],
             "evidence": [
                 {"id": evidence_id, "text": evidence[evidence_id].text}
