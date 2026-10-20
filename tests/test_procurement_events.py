@@ -182,16 +182,14 @@ def test_delete_procurement_event_with_existing_proposal():
 
     assert proposal_response.status_code == 201
 
-    # Procurement event is referenced by the proposal,
-    # so deletion should be rejected.
+    # Related proposals require explicit confirmation.
     response = client.delete(
         f"/procurement-events/{procurement_event['id']}"
     )
 
     assert response.status_code == 409
-    assert response.json() == {
-        "detail": (
-            "Procurement event cannot be deleted because "
-            "it has existing proposals"
-        )
-    }
+    assert "confirm again" in response.json()["detail"]
+    confirmed = client.delete(f"/procurement-events/{procurement_event['id']}?confirm_related=true")
+    assert confirmed.status_code == 204
+    assert client.get(f"/proposals/{proposal_response.json()['id']}").status_code == 404
+    assert client.get(f"/suppliers/{supplier['id']}").status_code == 200

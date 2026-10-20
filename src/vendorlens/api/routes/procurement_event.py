@@ -8,7 +8,10 @@ from vendorlens.api.dependencies import get_db
 from vendorlens.api.schemas.procurement_event import ProcurementEventCreate, ProcurementEventRead, ProcurementEventUpdate
 from vendorlens.core.security import require_api_key
 from vendorlens.db.models.procurement_event import ProcurementEvent
-from vendorlens.db.models.proposal import Proposal
+from vendorlens.api.storage_dependencies import get_storage
+from vendorlens.api.deletion import perform_deletion
+from vendorlens.services.deletion import DeletionImpact, get_deletion_impact
+from vendorlens.services.storage import LocalFileStorage
 
 
 router = APIRouter(
@@ -92,10 +95,12 @@ def update_procurement_event(
 def delete_procurement_event(
     procurement_event_id: uuid.UUID,
     db: Session = Depends(get_db),
+    storage: LocalFileStorage = Depends(get_storage),
+    confirm_related: bool = False,
 ):
     statement = select(ProcurementEvent).where(
         ProcurementEvent.id == procurement_event_id
-    )
+    ).with_for_update()
     procurement_event = db.scalars(statement).first()
 
     if procurement_event is None:
@@ -104,18 +109,12 @@ def delete_procurement_event(
             detail="Procurement event not found",
         )
 
-    proposal_statement = select(Proposal).where(
-        Proposal.procurement_event_id == procurement_event_id
-    )
+    perform_deletion(db, procurement_event, storage, confirm_related)
 
-    proposal = db.scalars(proposal_statement).first()
 
-    if proposal is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Procurement event cannot be deleted because it has existing proposals"
-            ),
-        )
-    db.delete(procurement_event)
-    db.commit()
+@router.get("/{procurement_event_id}/deletion-impact", response_model=DeletionImpact)
+def preview_event_deletion(procurement_event_id: uuid.UUID, db: Session = Depends(get_db)):
+    event = db.get(ProcurementEvent, procurement_event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Procurement event not found")
+    return get_deletion_impact(db, event)

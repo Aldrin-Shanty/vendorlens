@@ -13,6 +13,10 @@ from vendorlens.core.security import require_api_key
 from vendorlens.db.models.procurement_event import ProcurementEvent
 from vendorlens.db.models.proposal import Proposal
 from vendorlens.db.models.supplier import Supplier
+from vendorlens.api.storage_dependencies import get_storage
+from vendorlens.api.deletion import perform_deletion
+from vendorlens.services.deletion import DeletionImpact, get_deletion_impact
+from vendorlens.services.storage import LocalFileStorage
 
 
 router = APIRouter(
@@ -111,10 +115,12 @@ def get_proposal(
 def delete_proposal(
     proposal_id: uuid.UUID,
     db: Session = Depends(get_db),
+    storage: LocalFileStorage = Depends(get_storage),
+    confirm_related: bool = False,
 ):
     statement = select(Proposal).where(
         Proposal.id == proposal_id
-    )
+    ).with_for_update()
     proposal = db.scalars(statement).first()
 
     if proposal is None:
@@ -123,5 +129,12 @@ def delete_proposal(
             detail="Proposal not found",
         )
 
-    db.delete(proposal)
-    db.commit()
+    perform_deletion(db, proposal, storage, confirm_related)
+
+
+@router.get("/{proposal_id}/deletion-impact", response_model=DeletionImpact)
+def preview_proposal_deletion(proposal_id: uuid.UUID, db: Session = Depends(get_db)):
+    proposal = db.get(Proposal, proposal_id)
+    if proposal is None:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    return get_deletion_impact(db, proposal)

@@ -256,3 +256,29 @@ Workflow API tests use an in-memory checkpointer and synthetic model results.
 Separate PostgreSQL tests verify resuming with a new graph and connection,
 preserving results and counters, and isolation between workflow IDs. These
 checks do not simulate a process crash during a model call.
+
+### Deleting records and their evidence
+
+The frontend shows a confirmation dialog with current related-record counts.
+Deleting a proposal also deletes its documents, versions, evidence chunks, stored
+PDFs, and saved comparison workflows that used that supplier's evidence in the
+same event. Deleting an event removes all its proposals and their owned data;
+deleting a supplier removes that supplier's proposals across events. Other
+suppliers and events are preserved. Empty events and suppliers do not show the
+related-proposal warning. Canceling does not issue a delete request.
+
+For direct API clients, preview the impact with
+`GET /proposals/{id}/deletion-impact`,
+`GET /procurement-events/{id}/deletion-impact`, or
+`GET /suppliers/{id}/deletion-impact`. The DELETE routes require
+`?confirm_related=true` when related records or saved comparisons exist;
+otherwise they return 409 without deleting anything. An empty record can be
+deleted without that flag. All these endpoints require `X-API-Key`.
+
+Database rows and affected checkpoints are removed in the same transaction.
+PDFs are first moved into a reversible staging directory under `data/uploads`;
+database failure restores them. Once the database commit succeeds, the staged
+files are removed. If that final filesystem cleanup fails, the API reports that
+the record was deleted and logs the remaining staging location for cleanup.
+Active comparisons hold transaction-scoped locks so deletion waits until their
+model execution finishes before removing saved evidence.

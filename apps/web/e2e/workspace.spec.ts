@@ -1,6 +1,11 @@
 import { test, expect } from "@playwright/test";
 
-test("demo supplier CRUD, filtering, and relationship protection", async ({
+test.beforeEach(async ({ page }) => {
+  // Demo tests must never fall through to a developer's running API.
+  await page.route("**/api/**", (route) => route.abort("connectionrefused"));
+});
+
+test("demo supplier CRUD, filtering, and confirmed cascade deletion", async ({
   page,
 }) => {
   await page.goto("/");
@@ -33,12 +38,25 @@ test("demo supplier CRUD, filtering, and relationship protection", async ({
   await page
     .getByRole("button", { name: "Delete Northstar Technologies" })
     .click();
+  await expect(page.getByRole("dialog")).toContainText("2 related proposals");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(
+    page.getByText("Northstar Technologies", { exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Delete Northstar Technologies" })
+    .click();
   await page
     .getByRole("button", { name: "Delete record", exact: true })
     .click();
-  await expect(page.getByRole("alert")).toContainText(
-    "Remove associated proposals",
-  );
+  await expect(
+    page.getByText("Northstar Technologies", { exact: true }),
+  ).toHaveCount(0);
+  await page
+    .locator("nav")
+    .getByRole("button", { name: "Proposals", exact: true })
+    .click();
+  await expect(page.locator("tbody tr")).toHaveCount(4);
 });
 
 test("evidence answers include source pages; search also works", async ({
@@ -97,11 +115,6 @@ test("live workspace loads and posts the existing API contract", async ({
       });
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Connect API", exact: true }).click();
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Connect API", exact: true })
-    .click();
   await expect(page.getByRole("button", { name: "Live API" })).toBeVisible();
   await page.getByRole("button", { name: "New event", exact: true }).click();
   await page
@@ -116,6 +129,7 @@ test("live workspace loads and posts the existing API contract", async ({
 test("mobile navigation and upload size validation", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
+  await expect(page.getByRole("button", { name: "Demo mode" })).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth,
@@ -139,6 +153,7 @@ test("mobile navigation and upload size validation", async ({ page }) => {
 test("capture desktop and mobile overview", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1050 });
   await page.goto("/");
+  await expect(page.getByRole("button", { name: "Demo mode" })).toBeVisible();
   await page.screenshot({
     path: "test-results/overview-desktop.png",
     fullPage: true,

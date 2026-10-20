@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 
 from vendorlens.workflows.review import ReviewDecision
+from vendorlens.services.data_locks import lock_comparison_data
 from vendorlens.workflows.budget import ExecutionBudget
 from vendorlens.workflows.comparison import build_comparison_graph
 from vendorlens.services.errors import (
@@ -30,6 +31,7 @@ def start_comparison_workflow(
     budget: ExecutionBudget | None = None,
 ) -> uuid.UUID:
     """Run a new comparison until completion, review, or failure."""
+    lock_comparison_data(db, procurement_event_id, supplier_ids)
     workflow_id = uuid.uuid4()
 
     config: RunnableConfig = {
@@ -100,6 +102,8 @@ def resume_comparison_workflow(
         procurement_event_id=procurement_event_id,
         workflow_id=workflow_id,
     )
+
+    lock_comparison_data(db, procurement_event_id, state["supplier_ids"])
 
     if state.get("status") != "awaiting_review":
         raise WorkflowReviewConflictError(

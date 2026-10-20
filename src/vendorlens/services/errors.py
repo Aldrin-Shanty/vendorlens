@@ -19,3 +19,11 @@ class WorkflowNotFoundError(LookupError):
 
 class WorkflowReviewConflictError(ValueError):
     """The workflow is not waiting for a review decision."""
+
+
+class DeletionConfirmationRequired(ValueError):
+    """Related data must be explicitly included in the deletion request."""
+
+
+class DeletionStorageError(Exception):
+    """Stored files could not be prepared for reversible deletion."""

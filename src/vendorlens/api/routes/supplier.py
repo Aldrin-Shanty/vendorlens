@@ -8,7 +8,10 @@ from vendorlens.api.dependencies import get_db
 from vendorlens.api.schemas.supplier import SupplierCreate, SupplierRead, SupplierUpdate
 from vendorlens.db.models.supplier import Supplier
 from vendorlens.core.security import require_api_key
-from vendorlens.db.models.proposal import Proposal
+from vendorlens.api.storage_dependencies import get_storage
+from vendorlens.api.deletion import perform_deletion
+from vendorlens.services.deletion import DeletionImpact, get_deletion_impact
+from vendorlens.services.storage import LocalFileStorage
 
 router = APIRouter(
     prefix="/suppliers",
@@ -82,8 +85,10 @@ def update_supplier(
 def delete_supplier(
     supplier_id: uuid.UUID,
     db: Session = Depends(get_db),
+    storage: LocalFileStorage = Depends(get_storage),
+    confirm_related: bool = False,
 ):
-    statement = select(Supplier).where(Supplier.id == supplier_id)
+    statement = select(Supplier).where(Supplier.id == supplier_id).with_for_update()
     supplier = db.scalars(statement).first()
 
     if supplier is None:
@@ -92,18 +97,12 @@ def delete_supplier(
             detail="Supplier not found",
         )
 
-    proposal_statement = select(Proposal).where(
-        Proposal.supplier_id == supplier_id
-    )
+    perform_deletion(db, supplier, storage, confirm_related)
 
-    proposal = db.scalars(proposal_statement).first()
 
-    if proposal is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Supplier cannot be deleted because it has existing proposals"
-            ),
-        )
-    db.delete(supplier)
-    db.commit()
+@router.get("/{supplier_id}/deletion-impact", response_model=DeletionImpact)
+def preview_supplier_deletion(supplier_id: uuid.UUID, db: Session = Depends(get_db)):
+    supplier = db.get(Supplier, supplier_id)
+    if supplier is None:
+        raise HTTPException(status_code=404, detail="Supplier not found")
+    return get_deletion_impact(db, supplier)

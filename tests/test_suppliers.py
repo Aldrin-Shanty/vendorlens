@@ -168,8 +168,8 @@ def test_delete_supplier_with_existing_proposal():
     )
 
     assert response.status_code == 409
-    assert response.json() == {
-        "detail": (
-            "Supplier cannot be deleted because it has existing proposals"
-        )
-    }
+    assert "confirm again" in response.json()["detail"]
+    confirmed = client.delete(f"/suppliers/{supplier['id']}?confirm_related=true")
+    assert confirmed.status_code == 204
+    assert client.get(f"/proposals/{proposal_response.json()['id']}").status_code == 404
+    assert client.get(f"/procurement-events/{procurement_event['id']}").status_code == 200

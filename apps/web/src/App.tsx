@@ -25,23 +25,28 @@ import {
   Trash2,
   Network,
   Layers3,
+  GitCompareArrows,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import {
   loadWorkspace,
+  ApiError,
   request,
+  type DeletionImpact,
   type Workspace,
   type Evidence,
   type Answer,
 } from "@/lib/api";
 import { demoWorkspace, demoEvidence } from "@/lib/demo";
+import { ComparisonWorkspace } from "@/components/ComparisonWorkspace";
 
 type Page =
   | "Overview"
   | "Procurement events"
   | "Suppliers"
   | "Proposals"
+  | "Comparisons"
   | "Evidence assistant";
 type Editor = {
   kind: "event" | "supplier" | "proposal";
@@ -53,6 +58,7 @@ const nav = [
   { name: "Procurement events", icon: FolderKanban },
   { name: "Suppliers", icon: Building2 },
   { name: "Proposals", icon: FileText },
+  { name: "Comparisons", icon: GitCompareArrows },
   { name: "Evidence assistant", icon: Sparkles },
 ] as const;
 const colors = ["mint", "lavender", "peach", "blue", "yellow"];
@@ -66,14 +72,20 @@ const initials = (name: string) =>
 
 export default function App() {
   const [page, setPage] = useState<Page>("Overview");
-  const [data, setData] = useState<Workspace>(structuredClone(demoWorkspace));
-  const [demo, setDemo] = useState(true);
+  const [data, setData] = useState<Workspace>({
+    suppliers: [],
+    events: [],
+    proposals: [],
+  });
+  const [demo, setDemo] = useState(false);
+  const [initializing, setInitializing] = useState(true);
+  const [startupFailure, setStartupFailure] = useState("");
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [query, setQuery] = useState("");
-  const [eventId, setEventId] = useState("e1");
+  const [eventId, setEventId] = useState("");
   const [editor, setEditor] = useState<Editor>(null);
   const [settings, setSettings] = useState(false);
   const [help, setHelp] = useState(false);
@@ -84,6 +96,8 @@ export default function App() {
     name: string;
   } | null>(null);
   const [question, setQuestion] = useState("");
+  const [deleteImpact, setDeleteImpact] = useState<DeletionImpact | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [searchMode, setSearchMode] = useState(false);
@@ -91,11 +105,101 @@ export default function App() {
   const [file, setFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState("");
   useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    void loadWorkspace({ signal: controller.signal })
+      .then((workspace) => {
+        if (!active) return;
+        setData(workspace);
+        setDemo(false);
+        setEventId(workspace.events[0]?.id || "");
+      })
+      .catch((err) => {
+        if (!active) return;
+        setData(structuredClone(demoWorkspace));
+        setDemo(true);
+        setEventId("e1");
+        const reason = controller.signal.aborted
+          ? "The API did not respond within 8 seconds."
+          : err instanceof Error
+            ? err.message
+            : "Unable to connect to the API.";
+        setStartupFailure(
+          `Live API unavailable. Showing sample data. ${reason}`,
+        );
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        controller.abort();
+        if (active) setInitializing(false);
+      });
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, []);
+  useEffect(() => {
     if (notice) {
       const timer = setTimeout(() => setNotice(""), 5000);
       return () => clearTimeout(timer);
     }
   }, [notice]);
+  useEffect(() => {
+    if (!deleteItem) {
+      setDeleteImpact(null);
+      setDeleteLoading(false);
+      return;
+    }
+    let active = true;
+    setDeleteImpact(null);
+    setDeleteLoading(true);
+    setError("");
+    const endpoint =
+      deleteItem.kind === "event"
+        ? "procurement-events"
+        : deleteItem.kind === "supplier"
+          ? "suppliers"
+          : "proposals";
+    const preview = demo
+      ? Promise.resolve({
+          proposals:
+            deleteItem.kind === "proposal"
+              ? 0
+              : data.proposals.filter((p) =>
+                  deleteItem.kind === "event"
+                    ? p.procurement_event_id === deleteItem.id
+                    : p.supplier_id === deleteItem.id,
+                ).length,
+          documents: 0,
+          document_versions: 0,
+          evidence_chunks: 0,
+          comparison_workflows: 0,
+          comparison_workflow_ids: [],
+        })
+      : request<DeletionImpact>(
+          `/${endpoint}/${deleteItem.id}/deletion-impact`,
+        );
+    void preview
+      .then((impact) => {
+        if (active) setDeleteImpact(impact);
+      })
+      .catch((err) => {
+        if (active)
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Could not check related records. Close this dialog and try again.",
+          );
+      })
+      .finally(() => {
+        if (active) setDeleteLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [deleteItem, demo, data.proposals]);
   useEffect(() => {
     if (!data.events.some((event) => event.id === eventId)) {
       setEventId(data.events[0]?.id || "");
@@ -121,6 +225,7 @@ export default function App() {
       const workspace = await loadWorkspace();
       setData(workspace);
       setDemo(false);
+      setStartupFailure("");
       setEventId(workspace.events[0]?.id || "");
       setAnswer(null);
       setEvidence([]);
@@ -135,6 +240,7 @@ export default function App() {
   const useDemo = () => {
     setData(structuredClone(demoWorkspace));
     setDemo(true);
+    setStartupFailure("");
     setEventId("e1");
     setAnswer(null);
     setEvidence([]);
@@ -213,22 +319,11 @@ export default function App() {
     }
   };
   const remove = async () => {
-    if (!deleteItem) return;
+    if (!deleteItem || !deleteImpact || deleteLoading || busy) return;
     setBusy(true);
     setError("");
     try {
       const { kind, id } = deleteItem;
-      if (
-        kind !== "proposal" &&
-        data.proposals.some((p) =>
-          kind === "event"
-            ? p.procurement_event_id === id
-            : p.supplier_id === id,
-        )
-      )
-        throw new Error(
-          "Remove associated proposals before deleting this record.",
-        );
       const collection =
         kind === "event"
           ? "events"
@@ -237,17 +332,83 @@ export default function App() {
             : "proposals";
       if (!demo)
         await request(
-          `/${kind === "event" ? "procurement-events" : collection}/${id}`,
+          `/${kind === "event" ? "procurement-events" : collection}/${id}?confirm_related=${deleteImpact.proposals > 0 || deleteImpact.documents > 0 || deleteImpact.comparison_workflows > 0}`,
           { method: "DELETE" },
         );
       setData((prev) => ({
         ...prev,
         [collection]: prev[collection].filter((row) => row.id !== id),
+        proposals: prev.proposals.filter((proposal) =>
+          kind === "proposal"
+            ? proposal.id !== id
+            : kind === "event"
+              ? proposal.procurement_event_id !== id
+              : proposal.supplier_id !== id,
+        ),
       }));
+      setAnswer(null);
+      setEvidence([]);
+      try {
+        const key = "vendorlens.workflow-references.v1";
+        const stored: unknown = JSON.parse(localStorage.getItem(key) || "[]");
+        if (Array.isArray(stored))
+          localStorage.setItem(
+            key,
+            JSON.stringify(
+              stored.filter(
+                (run) =>
+                  !deleteImpact.comparison_workflow_ids.includes(run?.id),
+              ),
+            ),
+          );
+      } catch {
+        /* References can be reopened manually when browser storage is unavailable. */
+      }
       setDeleteItem(null);
-      setNotice("Record deleted.");
+      setNotice("Record and its related data deleted.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to delete.");
+      if (err instanceof ApiError && err.status === 409 && deleteItem) {
+        const endpoint =
+          deleteItem.kind === "event"
+            ? "procurement-events"
+            : deleteItem.kind === "supplier"
+              ? "suppliers"
+              : "proposals";
+        try {
+          setDeleteImpact(
+            await request<DeletionImpact>(
+              `/${endpoint}/${deleteItem.id}/deletion-impact`,
+            ),
+          );
+        } catch {
+          setDeleteImpact(null);
+        }
+      }
+      if (
+        err instanceof ApiError &&
+        err.status === 503 &&
+        !demo &&
+        deleteItem
+      ) {
+        try {
+          const refreshed = await loadWorkspace();
+          const remaining =
+            deleteItem.kind === "event"
+              ? refreshed.events
+              : deleteItem.kind === "supplier"
+                ? refreshed.suppliers
+                : refreshed.proposals;
+          if (!remaining.some((record) => record.id === deleteItem.id)) {
+            setData(refreshed);
+            setDeleteItem(null);
+            setAnswer(null);
+            setEvidence([]);
+          }
+        } catch {
+          /* Keep the original error if the connection is still unavailable. */
+        }
+      }
     } finally {
       setBusy(false);
     }
@@ -359,6 +520,23 @@ export default function App() {
       <p>Try another search or add your first record.</p>
     </div>
   );
+
+  if (initializing)
+    return (
+      <div className="startup-screen" role="status" aria-live="polite">
+        <span className="brand-mark">
+          <Network size={28} />
+        </span>
+        <h1>
+          vendorlens<span className="brand-dot">.</span>
+        </h1>
+        <p>
+          <Loader2 className="spin" size={18} />
+          Connecting to your workspace…
+        </p>
+        <small>Loading your suppliers, events, and proposals.</small>
+      </div>
+    );
 
   return (
     <div className="app-shell">
@@ -479,7 +657,9 @@ export default function App() {
                       ? "Build a connected view of your supplier network."
                       : page === "Proposals"
                         ? "Keep supplier submissions and supporting documents together."
-                        : "Ask better questions. Get answers grounded in your documents."}
+                        : page === "Comparisons"
+                          ? "Compare supplier facts, follow the evidence, and record your review."
+                          : "Ask better questions. Get answers grounded in your documents."}
               </p>
             </div>
             <div className="heading-actions">
@@ -497,7 +677,7 @@ export default function App() {
                     New event
                   </Button>
                 </>
-              ) : page !== "Evidence assistant" ? (
+              ) : page !== "Evidence assistant" && page !== "Comparisons" ? (
                 <Button
                   onClick={() =>
                     openEditor(
@@ -519,7 +699,9 @@ export default function App() {
               ) : (
                 <span className="evidence-label">
                   <ShieldCheck size={16} />
-                  Evidence-backed answers
+                  {page === "Comparisons"
+                    ? "Evidence and human review"
+                    : "Evidence-backed answers"}
                 </span>
               )}
             </div>
@@ -537,6 +719,11 @@ export default function App() {
                 Connect API <ArrowRight size={14} />
               </button>
             </div>
+          )}
+          {demo && startupFailure && (
+            <p className="connection-fallback" role="status">
+              {startupFailure}
+            </p>
           )}
           {error && !editor && !deleteItem && (
             <div className="error" role="alert">
@@ -582,7 +769,7 @@ export default function App() {
                     icon: ShieldCheck,
                     description: "A foundation for comparison",
                     color: "blue",
-                    next: "Evidence assistant",
+                    next: "Comparisons",
                   },
                 ].map((stat) => (
                   <button
@@ -820,8 +1007,8 @@ export default function App() {
                       },
                       {
                         title: "Follow the evidence",
-                        text: "Ask, compare, and review the sources.",
-                        next: () => navigate("Evidence assistant"),
+                        text: "Compare facts and review the sources.",
+                        next: () => navigate("Comparisons"),
                       },
                     ].map((step, i) => (
                       <button key={step.title} onClick={step.next}>
@@ -1088,6 +1275,15 @@ export default function App() {
                 not listed by the current API.
               </div>
             </section>
+          )}
+          {page === "Comparisons" && (
+            <ComparisonWorkspace
+              key={`${demo ? "demo" : "live"}:${eventId}`}
+              data={data}
+              demo={demo}
+              eventId={eventId}
+              onEventChange={setEventId}
+            />
           )}
           {page === "Evidence assistant" && (
             <div className="evidence-layout">
@@ -1410,8 +1606,8 @@ export default function App() {
           </div>
           <p>
             Your project root <code>.env</code> supplies <code>API_KEY</code>.
-            Optionally set <code>API_TARGET</code> there, then restart the frontend development
-            server. The key stays in the server-side proxy.
+            Optionally set <code>API_TARGET</code> there, then restart the
+            frontend development server. The key stays in the server-side proxy.
           </p>
           <div className="config-preview">
             API_TARGET=http://127.0.0.1:8000
@@ -1449,6 +1645,45 @@ export default function App() {
         title="Delete this record?"
         description={`This will delete ${deleteItem?.name || "this record"}${demo ? " from the demo session" : " from your workspace"}.`}
       >
+        {deleteLoading && (
+          <p className="deletion-loading" role="status">
+            <Loader2 size={16} className="spin" />
+            Checking related records…
+          </p>
+        )}
+        {deleteImpact &&
+          (deleteItem?.kind === "proposal" ||
+            deleteImpact.proposals > 0 ||
+            deleteImpact.comparison_workflows > 0) && (
+            <div className="deletion-warning">
+              <strong>
+                {deleteItem?.kind === "proposal"
+                  ? "Attached documents and evidence will also be deleted."
+                  : deleteImpact.proposals > 0
+                    ? `This will also delete ${deleteImpact.proposals} related proposal${deleteImpact.proposals === 1 ? "" : "s"} and all their documents and evidence.`
+                    : "Saved comparisons for this record will also be deleted."}
+              </strong>
+              {deleteImpact.documents > 0 && (
+                <p>
+                  {deleteImpact.documents} document
+                  {deleteImpact.documents === 1 ? "" : "s"},{" "}
+                  {deleteImpact.document_versions} version
+                  {deleteImpact.document_versions === 1 ? "" : "s"}, and{" "}
+                  {deleteImpact.evidence_chunks} evidence chunk
+                  {deleteImpact.evidence_chunks === 1 ? "" : "s"}, including the
+                  stored PDF files.
+                </p>
+              )}
+              {deleteImpact.comparison_workflows > 0 && (
+                <p>
+                  {deleteImpact.comparison_workflows} saved comparison workflow
+                  {deleteImpact.comparison_workflows === 1 ? "" : "s"}{" "}
+                  containing this data will also be removed.
+                </p>
+              )}
+              <p>This cannot be undone. Choose Cancel to keep everything.</p>
+            </div>
+          )}
         {error && (
           <div className="error" role="alert">
             {error}
@@ -1465,7 +1700,11 @@ export default function App() {
           >
             Cancel
           </Button>
-          <Button variant="destructive" disabled={busy} onClick={remove}>
+          <Button
+            variant="destructive"
+            disabled={busy || deleteLoading || !deleteImpact}
+            onClick={remove}
+          >
             {busy && <Loader2 size={16} className="spin" />}Delete record
           </Button>
         </div>
@@ -1545,6 +1784,14 @@ export default function App() {
             <p>
               Select an event in the Evidence assistant to explore its
               documents.
+            </p>
+          </li>
+          <li>
+            <strong>Compare supplier facts and review issues.</strong>
+            <p>
+              Open Comparisons, select two to eight suppliers, and inspect cited
+              evidence. Reopen a saved workflow by ID to acknowledge issues or
+              reject the comparison.
             </p>
           </li>
         </ol>
