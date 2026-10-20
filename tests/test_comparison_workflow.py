@@ -547,3 +547,40 @@ def test_postgres_checkpoint_does_not_load_another_run(
     finally:
         with open_checkpointer(database_url) as saver:
             saver.delete_thread(saved_thread_id)
+
+def test_start_service_saves_workflow_under_returned_id(operations):
+    from vendorlens.workflows.services import start_comparison_workflow
+
+    supplier_ids, _, _, _, _ = operations
+    event_id = uuid.uuid4()
+    saver = InMemorySaver()
+    db = Mock(spec=Session)
+
+    workflow_id = start_comparison_workflow(
+        db,
+        checkpointer=saver,
+        procurement_event_id=event_id,
+        supplier_ids=supplier_ids,
+        budget=ExecutionBudget(
+            max_model_calls=6,
+            max_tool_calls=2,
+        ),
+    )
+
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": str(workflow_id),
+        }
+    }
+
+    graph = workflow.build_comparison_graph(
+        db,
+        checkpointer=saver,
+    )
+    snapshot = graph.get_state(config)
+
+    assert isinstance(workflow_id, uuid.UUID)
+    assert snapshot.values["procurement_event_id"] == event_id
+    assert snapshot.values["supplier_ids"] == supplier_ids
+    assert snapshot.values["status"] == "awaiting_review"
+    assert snapshot.next == ("human_review",)
