@@ -3,6 +3,8 @@ import type { ComparisonWorkflow, Relation, Supplier } from "./api";
 export function createDemoComparison(
   eventId: string,
   suppliers: Supplier[],
+  eventName = "Sample procurement event",
+  sequence = 1,
 ): ComparisonWorkflow {
   const judgment = (relation: Relation) => ({
     relation,
@@ -15,6 +17,13 @@ export function createDemoComparison(
   });
   return {
     workflow_id: crypto.randomUUID(),
+    supplier_ids: suppliers.map((supplier) => supplier.id),
+    name: `${eventName} — ${suppliers
+      .map((supplier) => supplier.name)
+      .sort((a, b) => a.localeCompare(b))
+      .join(" + ")} (${sequence})`,
+    sequence_number: sequence,
+    created_at: new Date().toISOString(),
     procurement_event_id: eventId,
     status: "awaiting_review",
     budget: {

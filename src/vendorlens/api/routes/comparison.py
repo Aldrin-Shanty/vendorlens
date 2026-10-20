@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
+from vendorlens.workflows.state import ComparisonWorkflowState
 from vendorlens.workflows.budget import ExecutionBudget
 from vendorlens.workflows.services import (
     get_comparison_workflow,
@@ -25,12 +26,25 @@ from vendorlens.services.schemas.supplier_comparison import SupplierComparison
 from vendorlens.services.errors import AIOutputError, AIServiceUnavailableError, EvidenceValidationError, SupplierSelectionError, WorkflowNotFoundError, WorkflowReviewConflictError
 from vendorlens.workflows.review import ReviewDecision
 from vendorlens.workflows.services import resume_comparison_workflow
+from vendorlens.workflows.catalog import WorkflowSummary, delete_workflows, list_workflows, prepare_workflow, synchronize_catalog
+from vendorlens.services.errors import DeletionConfirmationRequired
 
 router = APIRouter(
     prefix="/procurement-events",
     tags=["comparison"],
     dependencies=[Depends(require_api_key)],
 )
+
+
+def workflow_response(db: Session, checkpointer: BaseCheckpointSaver, workflow_id: uuid.UUID, state: ComparisonWorkflowState) -> ComparisonWorkflowResponse:
+    _, records = synchronize_catalog(db, checkpointer, state["procurement_event_id"])
+    record = records[workflow_id]
+    db.commit()
+    return ComparisonWorkflowResponse.model_validate({
+        **state, "workflow_id": workflow_id, "name": record.name,
+        "sequence_number": record.sequence_number, "created_at": record.created_at,
+        "status": state.get("status", "running"),
+    })
 
 
 @router.post(
@@ -103,12 +117,14 @@ def start_procurement_comparison_workflow(
         )
 
     supplier_count = len(request.supplier_ids)
+    record = prepare_workflow(db, checkpointer, procurement_event_id, request.supplier_ids)
 
     workflow_id = start_comparison_workflow(
         db,
         checkpointer=checkpointer,
         procurement_event_id=procurement_event_id,
         supplier_ids=request.supplier_ids,
+        workflow_id=record.id,
         budget=ExecutionBudget(
             max_model_calls=4 * supplier_count,
             max_tool_calls=supplier_count,
@@ -122,12 +138,7 @@ def start_procurement_comparison_workflow(
         workflow_id=workflow_id,
     )
 
-    return ComparisonWorkflowResponse.model_validate(
-        {
-            **state,
-            "workflow_id": workflow_id,
-        }
-    )
+    return workflow_response(db, checkpointer, workflow_id, state)
 
 @router.get(
     "/{procurement_event_id}/comparison-workflows/{workflow_id}",
@@ -162,12 +173,7 @@ def get_procurement_comparison_workflow(
             detail="Comparison workflow not found",
         ) from exc
 
-    return ComparisonWorkflowResponse.model_validate(
-        {
-            **state,
-            "workflow_id": workflow_id,
-        }
-    )
+    return workflow_response(db, checkpointer, workflow_id, state)
 
 @router.post(
     "/{procurement_event_id}/comparison-workflows/{workflow_id}/review",
@@ -207,9 +213,23 @@ def review_procurement_comparison_workflow(
             detail=str(exc),
         ) from exc
 
-    return ComparisonWorkflowResponse.model_validate(
-        {
-            **state,
-            "workflow_id": workflow_id,
-        }
-    )
+    return workflow_response(db, checkpointer, workflow_id, state)
+
+
+@router.get("/{procurement_event_id}/comparison-workflows", response_model=list[WorkflowSummary])
+def list_procurement_comparison_workflows(procurement_event_id: uuid.UUID, db: Session = Depends(get_db), checkpointer: BaseCheckpointSaver = Depends(get_checkpointer)):
+    if db.get(ProcurementEvent, procurement_event_id) is None:
+        raise HTTPException(status_code=404, detail="Procurement event not found")
+    return list_workflows(db, checkpointer, procurement_event_id)
+
+
+@router.delete("/{procurement_event_id}/comparison-workflows/{workflow_id}", status_code=204)
+def delete_procurement_comparison_workflow(procurement_event_id: uuid.UUID, workflow_id: uuid.UUID, confirm: bool = False, db: Session = Depends(get_db), checkpointer: BaseCheckpointSaver = Depends(get_checkpointer)):
+    if db.get(ProcurementEvent, procurement_event_id) is None:
+        raise HTTPException(status_code=404, detail="Procurement event not found")
+    try:
+        delete_workflows(db, checkpointer, event_id=procurement_event_id, workflow_id=workflow_id, confirmed=confirm)
+    except WorkflowNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DeletionConfirmationRequired as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

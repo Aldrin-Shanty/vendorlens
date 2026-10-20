@@ -38,7 +38,7 @@ For production, serve the compiled assets behind a reverse proxy that handles `/
 - Event-scoped question answering and semantic search with document/page citations
 - Supplier comparison workflows: select two to eight suppliers with proposals,
   inspect prices, warranties, delivery timelines, judgments, and cited passages
-- Saved workflow lookup by ID, status refresh, and recent workflow references
+- Named saved workflows from the server, status refresh, and confirmed deletion
 - Human review with acknowledge/reject decisions, required comments, and saved results
 - Accessible Radix dialogs, loading/empty/error states, keyboard focus, mobile navigation
 
@@ -75,12 +75,16 @@ reviewing preserve the original results and do not repeat model calls. If anothe
 request has already reviewed the workflow, the interface refreshes the saved
 result and reports the conflict.
 
-Keep the workflow ID to reopen it after restarting the API or browser. Recent
-workflow references (event and workflow IDs only) are stored in this browser's
-local storage; comparison contents and decisions remain in PostgreSQL. The recent
-list covers runs opened in this browser, since the backend has no workflow-list
-endpoint. After the automatic live connection succeeds, select the event and open a
-recent reference or paste its workflow UUID. IDs from another event return 404.
+Saved workflows are listed for the selected event, including runs created in other
+browsers. Names use `Event title — Supplier A + Supplier B (1)`. Supplier order
+does not affect the counter; each event and supplier set has its own sequence.
+Remaining runs are renumbered after deletion; deleting all resets numbering to 1. Names are snapshots of the titles at
+creation. Existing saved runs receive names automatically, oldest first.
+
+Use a row to reopen a comparison or its trash button to delete it after confirmation.
+**Delete all workflows** confirms deletion across every event. Workflow deletion
+removes results and review decisions while keeping source proposals and PDFs.
+UUIDs remain available under **Workflow details** and **Open by workflow ID**.
 
 Demo comparisons use explicitly labeled synthetic facts, sources, and judgments.
 Sample decisions last for the current preview and never call the backend.

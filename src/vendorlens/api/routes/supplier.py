@@ -12,6 +12,7 @@ from vendorlens.api.storage_dependencies import get_storage
 from vendorlens.api.deletion import perform_deletion
 from vendorlens.services.deletion import DeletionImpact, get_deletion_impact
 from vendorlens.services.storage import LocalFileStorage
+from vendorlens.services.data_locks import lock_records
 
 router = APIRouter(
     prefix="/suppliers",
@@ -88,6 +89,7 @@ def delete_supplier(
     storage: LocalFileStorage = Depends(get_storage),
     confirm_related: bool = False,
 ):
+    lock_records(db, [f"supplier:{supplier_id}"], shared=False)
     statement = select(Supplier).where(Supplier.id == supplier_id).with_for_update()
     supplier = db.scalars(statement).first()
 

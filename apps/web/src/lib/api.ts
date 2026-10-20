@@ -38,8 +38,13 @@ export type ReviewDecision = {
 };
 export type ComparisonWorkflow = {
   workflow_id: string;
+  name: string;
+  sequence_number: number;
+  created_at: string;
+  supplier_ids: string[];
   procurement_event_id: string;
   status:
+    | "running"
     | "completed"
     | "awaiting_review"
     | "reviewed"
@@ -110,6 +115,17 @@ export type ComparisonWorkflow = {
   error: string | null;
 };
 
+export type WorkflowSummary = Pick<
+  ComparisonWorkflow,
+  | "workflow_id"
+  | "procurement_event_id"
+  | "supplier_ids"
+  | "name"
+  | "sequence_number"
+  | "created_at"
+  | "status"
+>;
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -171,6 +187,20 @@ export const startComparison = (eventId: string, supplierIds: string[]) =>
 
 export const getComparison = (eventId: string, workflowId: string) =>
   request<ComparisonWorkflow>(workflowPath(eventId, workflowId));
+
+export const listComparisons = (eventId?: string, signal?: AbortSignal) =>
+  request<WorkflowSummary[]>(
+    eventId ? workflowPath(eventId) : "/comparison-workflows",
+    { signal },
+  );
+
+export const deleteComparison = (eventId: string, workflowId: string) =>
+  request<void>(`${workflowPath(eventId, workflowId)}?confirm=true`, {
+    method: "DELETE",
+  });
+
+export const deleteAllComparisons = () =>
+  request<void>("/comparison-workflows?confirm=true", { method: "DELETE" });
 
 export const reviewComparison = (
   eventId: string,

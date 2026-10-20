@@ -7,13 +7,19 @@ import {
   Loader2,
   RefreshCw,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import {
   ApiError,
   getComparison,
   reviewComparison,
   startComparison,
+  listComparisons,
+  deleteComparison,
+  deleteAllComparisons,
+  type WorkflowSummary,
   type ComparisonWorkflow,
   type FactField,
   type ReviewDecision,
@@ -31,6 +37,7 @@ const fields: {
   { key: "delivery_days", label: "Delivery", evidence: "delivery_evidence" },
 ];
 const statusLabels: Record<ComparisonWorkflow["status"], string> = {
+  running: "Running",
   completed: "Completed",
   awaiting_review: "Awaiting review",
   reviewed: "Reviewed",
@@ -82,7 +89,15 @@ export function ComparisonWorkspace({
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [workflow, setWorkflow] = useState<ComparisonWorkflow | null>(null);
-  const [history, setHistory] = useState(savedRuns);
+  const [runs, setRuns] = useState<WorkflowSummary[]>([]);
+  const [listLoading, setListLoading] = useState(false);
+  const [listError, setListError] = useState("");
+  const [listRevision, setListRevision] = useState(0);
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { kind: "one"; run: WorkflowSummary }
+    | { kind: "all"; count: number }
+    | null
+  >(null);
   const [lookupId, setLookupId] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -90,12 +105,50 @@ export function ComparisonWorkspace({
   const [comment, setComment] = useState("");
   const [action, setAction] = useState<ReviewDecision["action"] | "">("");
   const mounted = useRef(true);
+  const demoRuns = useRef(new Map<string, ComparisonWorkflow>());
+  const demoSequences = useRef<Record<string, number>>({});
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
     };
   }, []);
+  useEffect(() => {
+    if (demo || !eventId) return;
+    const controller = new AbortController();
+    setListLoading(true);
+    setListError("");
+    void listComparisons(eventId, controller.signal)
+      .then((items) => {
+        if (!controller.signal.aborted) {
+          setRuns(items);
+          setWorkflow((current) => {
+            const updated = items.find(
+              (item) => item.workflow_id === current?.workflow_id,
+            );
+            return current && updated
+              ? {
+                  ...current,
+                  name: updated.name,
+                  sequence_number: updated.sequence_number,
+                }
+              : current;
+          });
+        }
+      })
+      .catch((err) => {
+        if (!controller.signal.aborted)
+          setListError(
+            err instanceof Error
+              ? err.message
+              : "Unable to load saved workflows.",
+          );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setListLoading(false);
+      });
+    return () => controller.abort();
+  }, [demo, eventId, listRevision]);
 
   const eligibleIds = new Set(
     data.proposals
@@ -106,17 +159,16 @@ export function ComparisonWorkspace({
   const selection = selected.filter(
     (id) => eligibleIds.has(id) && data.suppliers.some((s) => s.id === id),
   );
-  const eventHistory = history.filter((run) => run.eventId === eventId);
 
   const accept = (result: ComparisonWorkflow) => {
     let storageNotice = "";
+    if (demo) demoRuns.current.set(result.workflow_id, result);
     // Preserve the reference even if the user left this page during extraction.
     if (!demo) {
       const updated = [
         { eventId, id: result.workflow_id },
         ...savedRuns().filter((run) => run.id !== result.workflow_id),
       ].slice(0, 30);
-      if (mounted.current) setHistory(updated);
       try {
         localStorage.setItem(storageKey, JSON.stringify(updated));
       } catch {
@@ -125,6 +177,10 @@ export function ComparisonWorkspace({
       }
     }
     if (!mounted.current) return;
+    setRuns((previous) => [
+      result,
+      ...previous.filter((run) => run.workflow_id !== result.workflow_id),
+    ]);
     setWorkflow(result);
     setLookupId(result.workflow_id);
     setComment("");
@@ -139,10 +195,15 @@ export function ComparisonWorkspace({
     setError("");
     setNotice("");
     try {
+      const group = [...selection].sort().join(",");
+      if (demo)
+        demoSequences.current[group] = (demoSequences.current[group] || 0) + 1;
       const result = demo
         ? createDemoComparison(
             eventId,
             suppliers.filter((s) => selection.includes(s.id)),
+            data.events.find((event) => event.id === eventId)?.title,
+            demoSequences.current[group],
           )
         : await startComparison(eventId, selection);
       accept(result);
@@ -171,6 +232,120 @@ export function ComparisonWorkspace({
       if (mounted.current)
         setError(
           err instanceof Error ? err.message : "Unable to load workflow.",
+        );
+      if (mounted.current && err instanceof ApiError && err.status === 404) {
+        setRuns((previous) =>
+          previous.filter((run) => run.workflow_id !== id.trim()),
+        );
+        if (workflow?.workflow_id === id.trim()) setWorkflow(null);
+      }
+    } finally {
+      if (mounted.current) setBusy("");
+    }
+  };
+
+  const requestDeleteAll = async () => {
+    setBusy("Checking saved workflows");
+    setError("");
+    try {
+      const all = demo ? runs : await listComparisons();
+      if (mounted.current) {
+        if (all.length) setDeleteTarget({ kind: "all", count: all.length });
+        else setNotice("There are no saved workflows to delete.");
+      }
+    } catch (err) {
+      if (mounted.current)
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to check saved workflows.",
+        );
+    } finally {
+      if (mounted.current) setBusy("");
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget || busy) return;
+    const target = deleteTarget;
+    setBusy("Deleting workflows");
+    setError("");
+    try {
+      if (!demo) {
+        if (target.kind === "all") await deleteAllComparisons();
+        else
+          await deleteComparison(
+            target.run.procurement_event_id,
+            target.run.workflow_id,
+          );
+      }
+      if (!mounted.current) return;
+      if (demo) {
+        if (target.kind === "all") demoRuns.current.clear();
+        else demoRuns.current.delete(target.run.workflow_id);
+        demoSequences.current = {};
+        const remaining = [...demoRuns.current.values()].sort(
+          (a, b) => a.sequence_number - b.sequence_number,
+        );
+        for (const run of remaining) {
+          const key = [...run.supplier_ids].sort().join(",");
+          const number = (demoSequences.current[key] || 0) + 1;
+          demoSequences.current[key] = number;
+          run.sequence_number = number;
+          run.name = run.name.replace(/ \(\d+\)$/, ` (${number})`);
+        }
+        setRuns(remaining.reverse());
+        setWorkflow((current) =>
+          current
+            ? { ...(demoRuns.current.get(current.workflow_id) || current) }
+            : current,
+        );
+      } else {
+        setRuns((previous) =>
+          target.kind === "all"
+            ? []
+            : previous.filter(
+                (run) => run.workflow_id !== target.run.workflow_id,
+              ),
+        );
+        setListRevision((value) => value + 1);
+      }
+      if (
+        target.kind === "all" ||
+        workflow?.workflow_id === target.run.workflow_id
+      ) {
+        setWorkflow(null);
+        setLookupId("");
+        setComment("");
+        setAction("");
+      }
+      try {
+        if (!demo)
+          localStorage.setItem(
+            storageKey,
+            JSON.stringify(
+              target.kind === "all"
+                ? []
+                : savedRuns().filter(
+                    (run) => run.id !== target.run.workflow_id,
+                  ),
+            ),
+          );
+      } catch {
+        /* The server list is authoritative when browser storage is unavailable. */
+      }
+      setDeleteTarget(null);
+      setNotice(
+        target.kind === "all"
+          ? "All saved workflows deleted. Source proposals and PDFs are kept."
+          : "Workflow deleted. Source proposals and PDFs are kept.",
+      );
+    } catch (err) {
+      if (mounted.current)
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to delete saved workflows.",
         );
     } finally {
       if (mounted.current) setBusy("");
@@ -313,63 +488,153 @@ export function ComparisonWorkspace({
         </div>
       </section>
 
-      {!demo && (
-        <section className="panel comparison-reopen">
+      <section className="panel saved-workflows">
+        <div className="panel-heading">
           <div>
-            <h2>Reopen a saved workflow</h2>
+            <h2>Saved workflows</h2>
             <p>
-              Use its ID after an API restart, or open a recent run from this
-              browser.
+              Comparisons for this procurement event, saved with their review
+              decisions.
             </p>
           </div>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void load(lookupId);
-            }}
-          >
-            <label className="sr-only" htmlFor="workflow-id">
-              Workflow ID
-            </label>
-            <input
-              id="workflow-id"
-              placeholder="Workflow UUID"
-              value={lookupId}
-              onChange={(e) => setLookupId(e.target.value)}
-              disabled={!!busy}
-              required
-            />
+          <div className="saved-workflow-actions">
+            {!demo && (
+              <Button
+                variant="outline"
+                disabled={!!busy || listLoading}
+                onClick={() => setListRevision((value) => value + 1)}
+              >
+                <RefreshCw size={15} />
+                Refresh list
+              </Button>
+            )}
             <Button
               variant="outline"
-              disabled={!!busy || !eventId || !lookupId.trim()}
+              disabled={!!busy}
+              onClick={requestDeleteAll}
             >
-              Open workflow <ArrowRight size={15} />
+              <Trash2 size={15} />
+              Delete all workflows
             </Button>
-          </form>
-          {!!eventHistory.length && (
-            <label>
-              Recent workflows
-              <select
-                aria-label="Recent workflows"
-                value=""
+          </div>
+        </div>
+        {listLoading && <p role="status">Loading saved workflows…</p>}
+        {listError && (
+          <p className="error" role="alert">
+            {listError}
+          </p>
+        )}
+        {!listLoading && !listError && !runs.length && (
+          <p className="comparison-hint">No saved workflows for this event.</p>
+        )}
+        {runs.map((run) => (
+          <div className="saved-workflow-row" key={run.workflow_id}>
+            <button
+              className="saved-workflow-open"
+              disabled={!!busy}
+              aria-label={`Open ${run.name}`}
+              onClick={() => {
+                const sample = demoRuns.current.get(run.workflow_id);
+                if (demo && sample) accept(sample);
+                else if (!demo) void load(run.workflow_id);
+              }}
+            >
+              <strong>{run.name}</strong>
+              <span>
+                {statusLabels[run.status]} ·{" "}
+                {new Date(run.created_at).toLocaleString()}
+              </span>
+            </button>
+            <Button
+              variant="outline"
+              disabled={!!busy}
+              aria-label={`Delete ${run.name}`}
+              onClick={() => {
+                setError("");
+                setDeleteTarget({ kind: "one", run });
+              }}
+            >
+              <Trash2 size={16} />
+            </Button>
+          </div>
+        ))}
+        {!demo && (
+          <details className="workflow-technical">
+            <summary>Open by workflow ID</summary>
+            <form
+              className="workflow-lookup"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void load(lookupId);
+              }}
+            >
+              <label className="sr-only" htmlFor="workflow-id">
+                Workflow ID
+              </label>
+              <input
+                id="workflow-id"
+                placeholder="Workflow UUID"
+                value={lookupId}
+                onChange={(e) => setLookupId(e.target.value)}
                 disabled={!!busy}
-                onChange={(e) => {
-                  if (e.target.value) void load(e.target.value);
-                }}
+                required
+              />
+              <Button
+                variant="outline"
+                disabled={!!busy || !eventId || !lookupId.trim()}
               >
-                <option value="">Choose a saved workflow</option>
-                {eventHistory.map((run) => (
-                  <option key={run.id} value={run.id}>
-                    {run.id}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-        </section>
-      )}
+                Open workflow <ArrowRight size={15} />
+              </Button>
+            </form>
+          </details>
+        )}
+      </section>
+      <Dialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open && !busy) {
+            setDeleteTarget(null);
+            setError("");
+          }
+        }}
+        title={
+          deleteTarget?.kind === "all"
+            ? "Delete all workflows?"
+            : "Delete this workflow?"
+        }
+        description={
+          deleteTarget?.kind === "all"
+            ? `Delete ${deleteTarget.count} saved workflow(s) across all procurement events? Source proposals and PDFs are kept.`
+            : `Delete ${deleteTarget?.kind === "one" ? deleteTarget.run.name : "this comparison"} and its review decisions? Source proposals and PDFs are kept.`
+        }
+      >
+        {error && (
+          <p className="error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="saved-workflow-actions">
+          <Button
+            variant="outline"
+            disabled={!!busy}
+            onClick={() => {
+              setDeleteTarget(null);
+              setError("");
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={!!busy}
+            onClick={confirmDelete}
+          >
+            {busy === "Deleting workflows" ? "Deleting…" : "Confirm deletion"}
+          </Button>
+        </div>
+      </Dialog>
 
-      {error && (
+      {error && !deleteTarget && (
         <div className="error" role="alert">
           {error}
         </div>
@@ -417,14 +682,13 @@ export function ComparisonWorkspace({
               {demo && (
                 <span className="badge badge-gray">Illustrative demo</span>
               )}
-              <h2>
-                {data.events.find(
-                  (event) => event.id === workflow.procurement_event_id,
-                )?.title || "Supplier comparison"}
-              </h2>
-              <p className="workflow-id">
-                Workflow ID <code>{workflow.workflow_id}</code>
-              </p>
+              <h2>{workflow.name}</h2>
+              <details className="workflow-technical">
+                <summary>Workflow details</summary>
+                <p className="workflow-id">
+                  Workflow ID <code>{workflow.workflow_id}</code>
+                </p>
+              </details>
             </div>
             {!demo && (
               <Button

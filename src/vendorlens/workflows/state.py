@@ -6,6 +6,7 @@ from vendorlens.workflows.budget import ExecutionBudget
 from vendorlens.workflows.review import ReviewIssue, ReviewDecision
 
 WorkflowStatus = Literal[
+    "running",
     "completed",
     "awaiting_review",
     "reviewed",

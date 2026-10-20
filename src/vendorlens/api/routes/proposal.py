@@ -17,6 +17,7 @@ from vendorlens.api.storage_dependencies import get_storage
 from vendorlens.api.deletion import perform_deletion
 from vendorlens.services.deletion import DeletionImpact, get_deletion_impact
 from vendorlens.services.storage import LocalFileStorage
+from vendorlens.services.data_locks import lock_records
 
 
 router = APIRouter(
@@ -118,6 +119,10 @@ def delete_proposal(
     storage: LocalFileStorage = Depends(get_storage),
     confirm_related: bool = False,
 ):
+    initial = db.get(Proposal, proposal_id)
+    if initial is None:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    lock_records(db, [f"event:{initial.procurement_event_id}"], shared=False)
     statement = select(Proposal).where(
         Proposal.id == proposal_id
     ).with_for_update()

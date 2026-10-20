@@ -7,6 +7,10 @@ const supplierIds = ["supplier-1", "supplier-2"];
 function result(status = "awaiting_review") {
   return {
     workflow_id: workflowId,
+    name: "Laptop refresh — Dell + HP (1)",
+    supplier_ids: supplierIds,
+    sequence_number: 1,
+    created_at: "2026-10-21T10:00:00Z",
     procurement_event_id: eventId,
     status,
     budget: {
@@ -109,6 +113,16 @@ async function mockApi(
           procurement_event_id: eventId,
         })),
       });
+    if (
+      (path === base || path === "/api/comparison-workflows") &&
+      method === "GET"
+    )
+      return route.fulfill({ json: [saved] });
+    if (
+      method === "DELETE" &&
+      (path === `${base}/${workflowId}` || path === "/api/comparison-workflows")
+    )
+      return route.fulfill({ status: 204 });
     if (path === base && method === "POST") {
       calls.start++;
       expect(route.request().postDataJSON()).toEqual({
@@ -166,7 +180,12 @@ async function start(page: Page) {
   await page
     .getByRole("button", { name: "Start comparison", exact: true })
     .click();
-  await expect(page.locator(".workflow-id code")).toBeVisible();
+  await expect(
+    page.getByRole("heading", {
+      name: "Laptop refresh — Dell + HP (1)",
+      exact: true,
+    }),
+  ).toBeVisible();
 }
 
 test("demo comparison includes citations and a sample human review on mobile", async ({
@@ -262,8 +281,11 @@ for (const action of ["acknowledge", "reject"]) {
     await page.reload();
     await connect(page);
     await page
-      .getByLabel("Recent workflows", { exact: true })
-      .selectOption(workflowId);
+      .getByRole("button", {
+        name: "Open Laptop refresh — Dell + HP (1)",
+        exact: true,
+      })
+      .click();
     await expect(
       page.getByText("Reviewed the warranty source.", { exact: true }),
     ).toBeVisible();
@@ -305,6 +327,7 @@ test("lookup validates IDs, reports missing workflows and resets on event change
   const calls = await mockApi(page);
   await page.goto("/");
   await connect(page);
+  await page.getByText("Open by workflow ID", { exact: true }).click();
   await page
     .getByRole("textbox", { name: "Workflow ID", exact: true })
     .fill("invalid");
@@ -345,6 +368,8 @@ test("leaving during extraction keeps the returned workflow reference", async ({
   await page.route(
     `**/api/procurement-events/${eventId}/comparison-workflows`,
     async (route) => {
+      if (route.request().method() === "GET")
+        return route.fulfill({ json: [result()] });
       await gate;
       await route.fulfill({ status: 201, json: result() });
     },
@@ -377,8 +402,11 @@ test("leaving during extraction keeps the returned workflow reference", async ({
     .getByRole("button", { name: "Comparisons", exact: true })
     .click();
   await page
-    .getByLabel("Recent workflows", { exact: true })
-    .selectOption(workflowId);
+    .getByRole("button", {
+      name: "Open Laptop refresh — Dell + HP (1)",
+      exact: true,
+    })
+    .click();
   await expect(page.locator(".workflow-id code")).toHaveText(workflowId);
 });
 
@@ -402,3 +430,102 @@ for (const status of ["completed", "failed", "stopped"]) {
       await expect(page.getByRole("alert")).toContainText("budget exhausted");
   });
 }
+
+for (const all of [false, true]) {
+  test(`confirmed ${all ? "bulk" : "individual"} workflow deletion keeps proposals`, async ({
+    page,
+  }) => {
+    await mockApi(page);
+    let deletes = 0;
+    await page.route("**/api/**", async (route) => {
+      if (deletes && route.request().method() === "GET" && new URL(route.request().url()).pathname.endsWith("/comparison-workflows")) return route.fulfill({json: []});
+      if (route.request().method() !== "DELETE") return route.fallback();
+      deletes++;
+      expect(new URL(route.request().url()).searchParams.get("confirm")).toBe(
+        "true",
+      );
+      expect(new URL(route.request().url()).pathname).toBe(
+        all
+          ? "/api/comparison-workflows"
+          : `/api/procurement-events/${eventId}/comparison-workflows/${workflowId}`,
+      );
+      return route.fulfill({ status: 204 });
+    });
+    await page.goto("/");
+    await connect(page);
+    await page
+      .getByRole("button", {
+        name: "Open Laptop refresh — Dell + HP (1)",
+        exact: true,
+      })
+      .click();
+    const openDelete = () =>
+      page
+        .getByRole("button", {
+          name: all
+            ? "Delete all workflows"
+            : "Delete Laptop refresh — Dell + HP (1)",
+          exact: true,
+        })
+        .click();
+    await openDelete();
+    await expect(page.getByRole("dialog")).toContainText(
+      "Source proposals and PDFs are kept",
+    );
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    expect(deletes).toBe(0);
+    await openDelete();
+    await page
+      .getByRole("button", { name: "Confirm deletion", exact: true })
+      .click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(
+      page.getByRole("button", {
+        name: "Open Laptop refresh — Dell + HP (1)",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("heading", {
+        name: "Laptop refresh — Dell + HP (1)",
+        exact: true,
+      }),
+    ).toHaveCount(0);
+    await expect(
+      page.getByRole("checkbox", { name: "Dell", exact: true }),
+    ).toBeVisible();
+    expect(deletes).toBe(1);
+  });
+}
+
+test("failed workflow deletion keeps the saved result and displays the error", async ({
+  page,
+}) => {
+  await mockApi(page);
+  await page.route("**/api/**", (route) =>
+    route.request().method() === "DELETE"
+      ? route.fulfill({ status: 503, json: { detail: "Storage unavailable" } })
+      : route.fallback(),
+  );
+  await page.goto("/");
+  await connect(page);
+  await page
+    .getByRole("button", {
+      name: "Delete Laptop refresh — Dell + HP (1)",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("button", { name: "Confirm deletion", exact: true })
+    .click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
+    "Storage unavailable",
+  );
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(
+    page.getByRole("button", {
+      name: "Open Laptop refresh — Dell + HP (1)",
+      exact: true,
+    }),
+  ).toBeVisible();
+});

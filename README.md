@@ -282,3 +282,21 @@ files are removed. If that final filesystem cleanup fails, the API reports that
 the record was deleted and logs the remaining staging location for cleanup.
 Active comparisons hold transaction-scoped locks so deletion waits until their
 model execution finishes before removing saved evidence.
+
+### Named workflow history and deletion
+
+Run `uv run alembic upgrade head` before starting the updated API. The workflow
+catalog migration adds names and persistent per-event/supplier-set run counters.
+Names follow `Event title — Supplier A + Supplier B (1)`; supplier order does not
+change the group, and deleting runs renumbers the remaining runs consecutively. Existing saved
+comparisons receive names automatically when listed or opened.
+
+- `GET /procurement-events/{event_id}/comparison-workflows`: named history for an event.
+- `GET /comparison-workflows`: history across events.
+- `DELETE /procurement-events/{event_id}/comparison-workflows/{workflow_id}?confirm=true`: delete one saved comparison.
+- `DELETE /comparison-workflows?confirm=true`: delete all saved comparisons across events.
+
+Deletion requires the API key and explicit confirmation, and removes checkpoints,
+results and review decisions. Source proposals and PDFs remain available. Without
+confirmation, deleting existing workflows returns 409. UUIDs remain the technical
+API identifiers. The UI provides named history and confirmation dialogs.

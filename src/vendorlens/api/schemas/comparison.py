@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -21,6 +22,10 @@ class CompareSuppliersRequest(BaseModel):
 
 class ComparisonWorkflowResponse(BaseModel):
     workflow_id: uuid.UUID
+    supplier_ids: list[uuid.UUID]
+    name: str
+    sequence_number: int
+    created_at: datetime
     procurement_event_id: uuid.UUID
     status: WorkflowStatus
     budget: ExecutionBudget

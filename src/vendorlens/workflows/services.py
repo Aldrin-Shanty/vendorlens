@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from vendorlens.workflows.review import ReviewDecision
 from vendorlens.services.data_locks import lock_comparison_data
+from vendorlens.services.data_locks import lock_records
 from vendorlens.workflows.budget import ExecutionBudget
 from vendorlens.workflows.comparison import build_comparison_graph
 from vendorlens.services.errors import (
@@ -29,10 +30,13 @@ def start_comparison_workflow(
     procurement_event_id: uuid.UUID,
     supplier_ids: list[uuid.UUID],
     budget: ExecutionBudget | None = None,
+    workflow_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
     """Run a new comparison until completion, review, or failure."""
+    workflow_id = workflow_id if workflow_id is not None else uuid.uuid4()
+    lock_records(db, ["workflow-catalog"], shared=True)
+    lock_records(db, [f"workflow:{workflow_id}"], shared=False)
     lock_comparison_data(db, procurement_event_id, supplier_ids)
-    workflow_id = uuid.uuid4()
 
     config: RunnableConfig = {
         "configurable": {
@@ -96,6 +100,8 @@ def resume_comparison_workflow(
     decision: ReviewDecision,
 ) -> ComparisonWorkflowState:
     """Submit a decision to a workflow paused for human review."""
+    lock_records(db, ["workflow-catalog"], shared=True)
+    lock_records(db, [f"workflow:{workflow_id}"], shared=False)
     state = get_comparison_workflow(
         db,
         checkpointer=checkpointer,

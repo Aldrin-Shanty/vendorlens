@@ -505,3 +505,122 @@ def test_review_requires_api_key(
         retrieval.call_count,
         extraction.call_count,
     ) == calls_before
+
+
+def test_workflow_names_ignore_supplier_order_and_refresh_deleted_numbers(client, workflow_api):
+    event_id, suppliers = create_comparison_inputs(client)
+    base = f"/procurement-events/{event_id}/comparison-workflows"
+    first = client.post(base, json={"supplier_ids": suppliers}).json()
+    second = client.post(base, json={"supplier_ids": suppliers[::-1]}).json()
+    assert first["name"] == "Workflow API test \u2014 Synthetic Dell + Synthetic HP (1)"
+    assert second["name"] == "Workflow API test \u2014 Synthetic Dell + Synthetic HP (2)"
+    assert first["created_at"]
+    saved = client.get(base).json()
+    assert {row["workflow_id"] for row in saved} == {first["workflow_id"], second["workflow_id"]}
+    target = f"{base}/{first['workflow_id']}"
+    assert client.delete(target).status_code == 409
+    assert client.get(target).status_code == 200
+    assert client.delete(target + "?confirm=true").status_code == 204
+    assert client.get(target).status_code == 404
+    remaining = client.get(base).json()
+    assert remaining[0]["sequence_number"] == 1
+    assert remaining[0]["name"].endswith("(1)")
+    third = client.post(base, json={"supplier_ids": suppliers}).json()
+    assert third["sequence_number"] == 2
+    assert third["name"].endswith("(2)")
+    assert len(client.get("/proposals").json()) == 2
+    assert len(client.get("/suppliers").json()) == 2
+
+
+def test_bulk_workflow_delete_covers_all_events_keeps_sources_and_counters(client, workflow_api):
+    groups = [create_comparison_inputs(client) for _ in range(2)]
+    for event_id, suppliers in groups:
+        response = client.post(f"/procurement-events/{event_id}/comparison-workflows", json={"supplier_ids": suppliers})
+        assert response.status_code == 201
+        assert response.json()["sequence_number"] == 1
+    assert len(client.get("/comparison-workflows").json()) == 2
+    assert client.delete("/comparison-workflows").status_code == 409
+    assert client.delete("/comparison-workflows?confirm=true").status_code == 204
+    assert client.get("/comparison-workflows").json() == []
+    assert len(client.get("/proposals").json()) == 4
+    assert len(client.get("/procurement-events").json()) == 2
+    event_id, suppliers = groups[0]
+    again = client.post(f"/procurement-events/{event_id}/comparison-workflows", json={"supplier_ids": suppliers})
+    assert again.json()["sequence_number"] == 1
+    assert client.delete("/comparison-workflows?confirm=true").status_code == 204
+    assert client.delete("/comparison-workflows?confirm=true").status_code == 204
+
+
+def test_workflow_deletion_is_scoped_to_event(client, workflow_api):
+    event_id, suppliers = create_comparison_inputs(client)
+    other_id, _ = create_comparison_inputs(client)
+    base = f"/procurement-events/{event_id}/comparison-workflows"
+    run = client.post(base, json={"supplier_ids": suppliers}).json()
+    assert client.delete(f"/procurement-events/{other_id}/comparison-workflows/{run['workflow_id']}?confirm=true").status_code == 404
+    assert client.get(f"{base}/{run['workflow_id']}").status_code == 200
+
+
+def test_legacy_postgres_runs_get_names_and_deletion_is_atomic(client, db, monkeypatch):
+    import os
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+    from vendorlens.db.models.comparison_workflow import ComparisonWorkflowRecord
+    from vendorlens.workflows.checkpoint import initialize_checkpoints, open_checkpointer
+    from vendorlens.workflows.comparison import build_comparison_graph
+    from vendorlens.workflows.state import create_initial_state
+
+    event_id, suppliers = create_comparison_inputs(client)
+    url = os.environ["TEST_DATABASE_URL"]
+    initialize_checkpoints(url)
+    ids = [uuid.uuid4(), uuid.uuid4()]
+    with open_checkpointer(url) as saver:
+        graph = build_comparison_graph(db, checkpointer=saver)
+        for workflow_id in ids:
+            graph.update_state({"configurable": {"thread_id": str(workflow_id)}}, create_initial_state(uuid.UUID(event_id), [uuid.UUID(value) for value in suppliers]))
+        app.dependency_overrides[get_checkpointer] = lambda: saver
+        try:
+            base = f"/procurement-events/{event_id}/comparison-workflows"
+            rows = client.get(base).json()
+            assert [row["sequence_number"] for row in rows] == [2, 1]
+            assert {row["workflow_id"] for row in rows} == {str(value) for value in ids}
+            def fail_commit(self):
+                raise RuntimeError("Synthetic commit failure")
+            with monkeypatch.context() as patch:
+                patch.setattr(Session, "commit", fail_commit)
+                with pytest.raises(RuntimeError, match="Synthetic commit failure"):
+                    client.delete(f"{base}/{ids[0]}?confirm=true")
+            assert saver.get_tuple({"configurable": {"thread_id": str(ids[0])}}) is not None
+            assert db.get(ComparisonWorkflowRecord, ids[0]) is not None
+            assert client.delete(f"{base}/{ids[0]}?confirm=true").status_code == 204
+            assert saver.get_tuple({"configurable": {"thread_id": str(ids[0])}}) is None
+            db.expire_all()
+            assert db.get(ComparisonWorkflowRecord, ids[0]) is None
+            assert saver.get_tuple({"configurable": {"thread_id": str(ids[1])}}) is not None
+            assert client.delete("/comparison-workflows?confirm=true").status_code == 204
+            assert client.get(base).json() == []
+            assert list(db.scalars(select(ComparisonWorkflowRecord))) == []
+            assert len(client.get("/proposals").json()) == 2
+        finally:
+            app.dependency_overrides.pop(get_checkpointer, None)
+            for workflow_id in ids:
+                saver.delete_thread(str(workflow_id))
+
+
+def test_deleting_middle_run_renumbers_only_its_supplier_group(client, workflow_api):
+    event_id, suppliers = create_comparison_inputs(client)
+    base = f"/procurement-events/{event_id}/comparison-workflows"
+    runs = [client.post(base, json={"supplier_ids": suppliers}).json() for _ in range(3)]
+    other_event, other_suppliers = create_comparison_inputs(client)
+    other_base = f"/procurement-events/{other_event}/comparison-workflows"
+    other = client.post(other_base, json={"supplier_ids": other_suppliers}).json()
+    assert client.delete(f"{base}/{runs[1]['workflow_id']}?confirm=true").status_code == 204
+    remaining = client.get(base).json()
+    assert {row["workflow_id"]: row["sequence_number"] for row in remaining} == {
+        runs[0]["workflow_id"]: 1, runs[2]["workflow_id"]: 2,
+    }
+    renamed = client.get(f"{base}/{runs[2]['workflow_id']}").json()
+    assert renamed["name"].endswith("(2)")
+    assert renamed["review_issues"] == runs[2]["review_issues"]
+    assert client.get(other_base).json()[0]["name"] == other["name"]
+    next_run = client.post(base, json={"supplier_ids": suppliers[::-1]}).json()
+    assert next_run["sequence_number"] == 3
