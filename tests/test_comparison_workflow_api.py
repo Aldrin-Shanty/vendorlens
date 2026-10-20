@@ -295,3 +295,213 @@ def test_get_workflow_requires_api_key(workflow_api):
         )
 
     assert response.status_code == 401
+
+@pytest.fixture
+def started_review_workflow(client, workflow_api):
+    event_id, supplier_ids = create_comparison_inputs(client)
+
+    response = client.post(
+        f"/procurement-events/{event_id}/comparison-workflows",
+        json={"supplier_ids": supplier_ids},
+    )
+    assert response.status_code == 201
+
+    return event_id, response.json()
+
+
+@pytest.mark.parametrize(
+    "action, expected_status",
+    [
+        ("acknowledge", "reviewed"),
+        ("reject", "rejected"),
+    ],
+)
+def test_review_workflow_preserves_results(
+    client,
+    workflow_api,
+    started_review_workflow,
+    action,
+    expected_status,
+):
+    _, retrieval, extraction = workflow_api
+    event_id, before = started_review_workflow
+    workflow_id = before["workflow_id"]
+
+    base_url = (
+        f"/procurement-events/{event_id}"
+        f"/comparison-workflows/{workflow_id}"
+    )
+    decision = {
+        "action": action,
+        "comment": "Inspected the cited evidence.",
+    }
+    calls_before = (
+        retrieval.call_count,
+        extraction.call_count,
+    )
+
+    response = client.post(
+        f"{base_url}/review",
+        json=decision,
+    )
+
+    assert response.status_code == 200
+    after = response.json()
+
+    assert after["workflow_id"] == workflow_id
+    assert after["procurement_event_id"] == event_id
+    assert after["status"] == expected_status
+    assert after["review_decision"] == decision
+
+    for field in ("comparison", "review_issues", "budget", "error"):
+        assert after[field] == before[field]
+
+    saved = client.get(base_url)
+    assert saved.status_code == 200
+    assert saved.json() == after
+
+    repeated = client.post(
+        f"{base_url}/review",
+        json=decision,
+    )
+    assert repeated.status_code == 409
+
+    unchanged = client.get(base_url)
+    assert unchanged.status_code == 200
+    assert unchanged.json() == after
+
+    assert (
+        retrieval.call_count,
+        extraction.call_count,
+    ) == calls_before
+
+
+@pytest.mark.parametrize(
+    "decision",
+    [
+        {"action": "approve_purchase", "comment": "Reviewed."},
+        {"action": "acknowledge", "comment": "   "},
+        {"action": "reject"},
+        {
+            "action": "reject",
+            "comment": "Reviewed.",
+            "unexpected": True,
+        },
+        {"action": "reject", "comment": "x" * 1001},
+    ],
+)
+def test_invalid_review_leaves_workflow_unchanged(
+    client, workflow_api, started_review_workflow, decision
+):
+    _, retrieval, extraction = workflow_api
+    event_id, before = started_review_workflow
+    workflow_id = before["workflow_id"]
+
+    base_url = (
+        f"/procurement-events/{event_id}"
+        f"/comparison-workflows/{workflow_id}"
+    )
+    calls_before = (
+        retrieval.call_count,
+        extraction.call_count,
+    )
+
+    response = client.post(
+        f"{base_url}/review",
+        json=decision,
+    )
+    assert response.status_code == 422
+
+    saved = client.get(base_url)
+    assert saved.status_code == 200
+    assert saved.json() == before
+
+    corrected = client.post(
+        f"{base_url}/review",
+        json={
+            "action": "reject",
+            "comment": "The supplied facts need correction.",
+        },
+    )
+    assert corrected.status_code == 200
+    assert corrected.json()["status"] == "rejected"
+
+    assert (
+        retrieval.call_count,
+        extraction.call_count,
+    ) == calls_before
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    ["unknown_event", "unknown_workflow", "wrong_event"],
+)
+def test_review_rejects_invalid_scope(
+    client, workflow_api, started_review_workflow, scenario
+):
+    _, retrieval, extraction = workflow_api
+    original_event_id, before = started_review_workflow
+    event_id = original_event_id
+    workflow_id = before["workflow_id"]
+
+    if scenario == "unknown_event":
+        event_id = str(uuid.uuid4())
+    elif scenario == "unknown_workflow":
+        workflow_id = str(uuid.uuid4())
+    else:
+        other_event = client.post(
+            "/procurement-events",
+            json={"title": "Another review event"},
+        )
+        assert other_event.status_code == 201
+        event_id = other_event.json()["id"]
+
+    calls_before = (
+        retrieval.call_count,
+        extraction.call_count,
+    )
+
+    response = client.post(
+        f"/procurement-events/{event_id}"
+        f"/comparison-workflows/{workflow_id}/review",
+        json={"action": "reject", "comment": "Reviewed."},
+    )
+
+    assert response.status_code == 404
+
+    original = client.get(
+        f"/procurement-events/{original_event_id}"
+        f"/comparison-workflows/{before['workflow_id']}"
+    )
+    assert original.status_code == 200
+    assert original.json() == before
+
+    assert (
+        retrieval.call_count,
+        extraction.call_count,
+    ) == calls_before
+
+
+def test_review_requires_api_key(
+    workflow_api, started_review_workflow
+):
+    _, retrieval, extraction = workflow_api
+    event_id, before = started_review_workflow
+    workflow_id = before["workflow_id"]
+    calls_before = (
+        retrieval.call_count,
+        extraction.call_count,
+    )
+
+    with TestClient(app) as unauthenticated_client:
+        response = unauthenticated_client.post(
+            f"/procurement-events/{event_id}"
+            f"/comparison-workflows/{workflow_id}/review",
+            json={"action": "reject", "comment": "Reviewed."},
+        )
+
+    assert response.status_code == 401
+    assert (
+        retrieval.call_count,
+        extraction.call_count,
+    ) == calls_before

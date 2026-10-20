@@ -22,7 +22,9 @@ from vendorlens.core.security import require_api_key
 from vendorlens.db.models.procurement_event import ProcurementEvent
 from vendorlens.services.comparison import compare_suppliers
 from vendorlens.services.schemas.supplier_comparison import SupplierComparison
-from vendorlens.services.errors import AIOutputError, AIServiceUnavailableError, EvidenceValidationError, SupplierSelectionError, WorkflowNotFoundError
+from vendorlens.services.errors import AIOutputError, AIServiceUnavailableError, EvidenceValidationError, SupplierSelectionError, WorkflowNotFoundError, WorkflowReviewConflictError
+from vendorlens.workflows.review import ReviewDecision
+from vendorlens.workflows.services import resume_comparison_workflow
 
 router = APIRouter(
     prefix="/procurement-events",
@@ -158,6 +160,51 @@ def get_procurement_comparison_workflow(
         raise HTTPException(
             status_code=404,
             detail="Comparison workflow not found",
+        ) from exc
+
+    return ComparisonWorkflowResponse.model_validate(
+        {
+            **state,
+            "workflow_id": workflow_id,
+        }
+    )
+
+@router.post(
+    "/{procurement_event_id}/comparison-workflows/{workflow_id}/review",
+    response_model=ComparisonWorkflowResponse,
+)
+def review_procurement_comparison_workflow(
+    procurement_event_id: uuid.UUID,
+    workflow_id: uuid.UUID,
+    decision: ReviewDecision,
+    db: Session = Depends(get_db),
+    checkpointer: BaseCheckpointSaver = Depends(get_checkpointer),
+):
+    event = db.get(ProcurementEvent, procurement_event_id)
+
+    if event is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Procurement event not found",
+        )
+
+    try:
+        state = resume_comparison_workflow(
+            db,
+            checkpointer=checkpointer,
+            procurement_event_id=procurement_event_id,
+            workflow_id=workflow_id,
+            decision=decision,
+        )
+    except WorkflowNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Comparison workflow not found",
+        ) from exc
+    except WorkflowReviewConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
         ) from exc
 
     return ComparisonWorkflowResponse.model_validate(
