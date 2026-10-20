@@ -627,8 +627,8 @@ def test_get_service_reads_state_without_repeating_work(operations):
 def test_get_service_rejects_unknown_or_wrong_event_workflow(
     operations, wrong_event
 ):
+    from vendorlens.services.errors import WorkflowNotFoundError
     from vendorlens.workflows.services import (
-        WorkflowNotFoundError,
         get_comparison_workflow,
         start_comparison_workflow,
     )
@@ -660,6 +660,91 @@ def test_get_service_rejects_unknown_or_wrong_event_workflow(
             workflow_id=(
                 workflow_id if wrong_event else uuid.uuid4()
             ),
+        )
+
+    assert [service.call_count for service in services] == calls_before
+
+@pytest.mark.parametrize(
+    "action, expected_status",
+    [
+        ("acknowledge", "reviewed"),
+        ("reject", "rejected"),
+    ],
+)
+def test_resume_service_records_decision_without_repeating_work(
+    operations, action, expected_status
+):
+    from vendorlens.services.errors import WorkflowReviewConflictError
+    from vendorlens.workflows.review import ReviewDecision
+    from vendorlens.workflows.services import (
+        get_comparison_workflow,
+        resume_comparison_workflow,
+        start_comparison_workflow,
+    )
+
+    supplier_ids, *services = operations
+    event_id = uuid.uuid4()
+    saver = InMemorySaver()
+    db = Mock(spec=Session)
+
+    workflow_id = start_comparison_workflow(
+        db,
+        checkpointer=saver,
+        procurement_event_id=event_id,
+        supplier_ids=supplier_ids,
+        budget=ExecutionBudget(
+            max_model_calls=6,
+            max_tool_calls=2,
+        ),
+    )
+
+    before = get_comparison_workflow(
+        db,
+        checkpointer=saver,
+        procurement_event_id=event_id,
+        workflow_id=workflow_id,
+    )
+    comparison_before_value = before.get("comparison")
+    assert comparison_before_value is not None
+    comparison_before = comparison_before_value.model_dump()
+    budget_before = before["budget"].model_dump()
+    issues_before = [
+        issue.model_dump()
+        for issue in before.get("review_issues", [])
+    ]
+    calls_before = [service.call_count for service in services]
+
+    decision = ReviewDecision(
+        action=action,
+        comment="Inspected the cited evidence.",
+    )
+
+    result = resume_comparison_workflow(
+        db,
+        checkpointer=saver,
+        procurement_event_id=event_id,
+        workflow_id=workflow_id,
+        decision=decision,
+    )
+
+    assert result.get("status") == expected_status
+    assert result.get("review_decision") == decision
+    comparison_after = result.get("comparison")
+    assert comparison_after is not None
+    assert comparison_after.model_dump() == comparison_before
+    assert result["budget"].model_dump() == budget_before
+    assert [
+        issue.model_dump()
+        for issue in result.get("review_issues", [])
+    ] == issues_before
+
+    with pytest.raises(WorkflowReviewConflictError):
+        resume_comparison_workflow(
+            db,
+            checkpointer=saver,
+            procurement_event_id=event_id,
+            workflow_id=workflow_id,
+            decision=decision,
         )
 
     assert [service.call_count for service in services] == calls_before

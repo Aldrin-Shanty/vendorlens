@@ -4,10 +4,18 @@ from typing import cast
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.types import Command
+
 from sqlalchemy.orm import Session
 
+
+from vendorlens.workflows.review import ReviewDecision
 from vendorlens.workflows.budget import ExecutionBudget
 from vendorlens.workflows.comparison import build_comparison_graph
+from vendorlens.services.errors import (
+    WorkflowNotFoundError,
+    WorkflowReviewConflictError,
+)
 from vendorlens.workflows.state import (
     ComparisonWorkflowState,
     create_initial_state,
@@ -45,10 +53,6 @@ def start_comparison_workflow(
 
     return workflow_id
 
-class WorkflowNotFoundError(LookupError):
-    """The workflow does not exist within the requested event."""
-
-
 def get_comparison_workflow(
     db: Session,
     *,
@@ -80,3 +84,49 @@ def get_comparison_workflow(
         )
 
     return cast(ComparisonWorkflowState, values)
+
+def resume_comparison_workflow(
+    db: Session,
+    *,
+    checkpointer: BaseCheckpointSaver,
+    procurement_event_id: uuid.UUID,
+    workflow_id: uuid.UUID,
+    decision: ReviewDecision,
+) -> ComparisonWorkflowState:
+    """Submit a decision to a workflow paused for human review."""
+    state = get_comparison_workflow(
+        db,
+        checkpointer=checkpointer,
+        procurement_event_id=procurement_event_id,
+        workflow_id=workflow_id,
+    )
+
+    if state.get("status") != "awaiting_review":
+        raise WorkflowReviewConflictError(
+            "Comparison workflow is not awaiting review"
+        )
+
+    config: RunnableConfig = {
+        "configurable": {
+            "thread_id": str(workflow_id),
+        }
+    }
+
+    graph = build_comparison_graph(
+        db,
+        checkpointer=checkpointer,
+    )
+
+    snapshot = graph.get_state(config)
+
+    if snapshot.next != ("human_review",):
+        raise WorkflowReviewConflictError(
+            "Comparison workflow is not paused for human review"
+        )
+
+    result = graph.invoke(
+        Command(resume=decision.model_dump(mode="json")),
+        config=config,
+    )
+
+    return cast(ComparisonWorkflowState, result)

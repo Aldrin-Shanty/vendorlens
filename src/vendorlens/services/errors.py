@@ -16,3 +16,6 @@ class AIServiceUnavailableError(Exception):
 
 class WorkflowNotFoundError(LookupError):
     """The workflow does not exist within the requested event."""
+
+class WorkflowReviewConflictError(ValueError):
+    """The workflow is not waiting for a review decision."""
