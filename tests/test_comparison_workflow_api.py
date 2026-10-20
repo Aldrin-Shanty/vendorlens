@@ -173,3 +173,125 @@ def test_start_workflow_requires_api_key(workflow_api):
     assert response.status_code == 401
     retrieval.assert_not_called()
     extraction.assert_not_called()
+
+def test_get_workflow_returns_saved_state_without_repeating_work(
+    client, workflow_api
+):
+    _, retrieval, extraction = workflow_api
+    event_id, supplier_ids = create_comparison_inputs(client)
+
+    started = client.post(
+        f"/procurement-events/{event_id}/comparison-workflows",
+        json={"supplier_ids": supplier_ids},
+    )
+    assert started.status_code == 201
+    expected = started.json()
+    workflow_id = expected["workflow_id"]
+
+    calls_before = (
+        retrieval.call_count,
+        extraction.call_count,
+    )
+
+    for _ in range(2):
+        response = client.get(
+            f"/procurement-events/{event_id}"
+            f"/comparison-workflows/{workflow_id}"
+        )
+
+        assert response.status_code == 200
+        assert response.json() == expected
+
+    assert (
+        retrieval.call_count,
+        extraction.call_count,
+    ) == calls_before
+
+
+def test_get_workflow_rejects_unknown_workflow(client, workflow_api):
+    _, retrieval, extraction = workflow_api
+    event_id, _ = create_comparison_inputs(client)
+
+    response = client.get(
+        f"/procurement-events/{event_id}"
+        f"/comparison-workflows/{uuid.uuid4()}"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Comparison workflow not found"
+    retrieval.assert_not_called()
+    extraction.assert_not_called()
+
+
+def test_get_workflow_rejects_wrong_event(client, workflow_api):
+    _, retrieval, extraction = workflow_api
+    event_id, supplier_ids = create_comparison_inputs(client)
+
+    started = client.post(
+        f"/procurement-events/{event_id}/comparison-workflows",
+        json={"supplier_ids": supplier_ids},
+    )
+    assert started.status_code == 201
+    workflow_id = started.json()["workflow_id"]
+
+    other_event = client.post(
+        "/procurement-events",
+        json={"title": "Another procurement event"},
+    )
+    assert other_event.status_code == 201
+    other_event_id = other_event.json()["id"]
+
+    calls_before = (
+        retrieval.call_count,
+        extraction.call_count,
+    )
+
+    response = client.get(
+        f"/procurement-events/{other_event_id}"
+        f"/comparison-workflows/{workflow_id}"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Comparison workflow not found"
+    assert (
+        retrieval.call_count,
+        extraction.call_count,
+    ) == calls_before
+
+
+def test_get_workflow_rejects_unknown_event(client, workflow_api):
+    response = client.get(
+        f"/procurement-events/{uuid.uuid4()}"
+        f"/comparison-workflows/{uuid.uuid4()}"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Procurement event not found"
+
+
+@pytest.mark.parametrize(
+    "event_id, workflow_id",
+    [
+        ("invalid-uuid", str(uuid.uuid4())),
+        (str(uuid.uuid4()), "invalid-uuid"),
+    ],
+)
+def test_get_workflow_rejects_invalid_ids(
+    client, workflow_api, event_id, workflow_id
+):
+    response = client.get(
+        f"/procurement-events/{event_id}"
+        f"/comparison-workflows/{workflow_id}"
+    )
+
+    assert response.status_code == 422
+
+
+def test_get_workflow_requires_api_key(workflow_api):
+    with TestClient(app) as unauthenticated_client:
+        response = unauthenticated_client.get(
+            f"/procurement-events/{uuid.uuid4()}"
+            f"/comparison-workflows/{uuid.uuid4()}"
+        )
+
+    assert response.status_code == 401
