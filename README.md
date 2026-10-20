@@ -93,8 +93,10 @@ Each supplier has a `judgment` object: `not_checked` means no semantic check;
 `checked` reports per-fact relation, probabilities, model/revision and input token
 count. Entailment maps to supports, neutral to insufficient, contradiction to
 contradicts. Confidence is the largest softmax probability, not calibrated truth.
-The 0.8 review threshold is provisional. Contradicted, insufficient and low-confidence
-facts require review; original facts remain visible.
+The workflow review policy owns the provisional 0.8 threshold and produces
+`review_issues` for missing, unchecked, contradicted, insufficient or low-confidence
+facts. Model judgments contain relation, confidence and probabilities; original
+facts remain visible.
 
 Bounds: three facts per supplier, eight suppliers per comparison, a 48,000-byte
 serialized state guard and 512 tokens per premise/hypothesis pair. Oversized input

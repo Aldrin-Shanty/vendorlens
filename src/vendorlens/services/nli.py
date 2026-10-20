@@ -4,6 +4,7 @@ import json
 import threading
 from pathlib import Path
 from typing import Any
+from collections.abc import Callable
 
 from pydantic import BaseModel
 
@@ -53,7 +54,11 @@ def load_runtime(*, download: bool = False):
     return tokenizer, model
 
 
-def judge_claims(claims: dict[str, dict]) -> NLIResult:
+def judge_claims(
+    claims: dict[str, dict],
+    *,
+    before_model_call: Callable[[], None] | None = None,
+) -> NLIResult:
     global _runtime
     if not 1 <= len(claims) <= 3:
         raise AIOutputError("Evidence judgment requires one to three claims")
@@ -62,7 +67,6 @@ def judge_claims(claims: dict[str, dict]) -> NLIResult:
 
     import torch
 
-    # Serialize loading and inference; Qwen retains the GPU for generation.
     with _lock:
         if _runtime is None:
             try:
@@ -82,6 +86,10 @@ def judge_claims(claims: dict[str, dict]) -> NLIResult:
             if token_count > MAX_PAIR_TOKENS:
                 raise AIOutputError("Cited evidence exceeds the 512-token NLI pair budget")
             total_tokens += token_count
+
+            if before_model_call is not None:
+                before_model_call()
+
             with torch.inference_mode():
                 logits = model(**inputs).logits[0]
                 scores = torch.softmax(logits, dim=-1).tolist()

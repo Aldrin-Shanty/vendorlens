@@ -8,7 +8,7 @@ import torch
 from vendorlens.services import evidence_judgment, nli
 from vendorlens.services.errors import AIOutputError, AIServiceUnavailableError, EvidenceValidationError
 from vendorlens.services.schemas.supplier_comparison import EvidenceReference, FactEvidence, SupplierFacts, Relation
-
+from vendorlens.workflows.budget import BudgetExceededError, ExecutionBudget
 
 @pytest.fixture
 def runtime(monkeypatch):
@@ -61,8 +61,8 @@ def test_all_nli_labels(runtime, scores, expected):
     assert result.answers["warranty_years"].choice == expected
 
 
-@pytest.mark.parametrize("choice, confidence, review", [("supports", .9, False), ("supports", .5, True), ("contradicts", .9, True), ("insufficient", .9, True)])
-def test_judgment_cited_sources_and_review(monkeypatch, choice: Relation, confidence: float, review: bool):
+@pytest.mark.parametrize("choice, confidence", [("supports", .9), ("supports", .5), ("contradicts", .9), ("insufficient", .9)])
+def test_judgment_preserves_cited_sources_and_scores(monkeypatch, choice: Relation, confidence: float):
     monkeypatch.setenv("NLI_EVIDENCE_JUDGMENT_ENABLED", "true")
     facts = SupplierFacts(supplier_name="Dell", warranty_years=3, warranty_evidence=FactEvidence(evidence_ids=[2]))
     evidence = {i: EvidenceReference(chunk_id=uuid.uuid4(), document_version_id=uuid.uuid4(), filename="proposal.pdf", page_number=1, text=text) for i, text in [(1, "Uncited"), (2, "Warranty: 3 years")]}
@@ -73,7 +73,9 @@ def test_judgment_cited_sources_and_review(monkeypatch, choice: Relation, confid
     monkeypatch.setattr(evidence_judgment, "judge_claims", fake_judge)
     result = evidence_judgment.judge_supplier_facts(facts, evidence)
     assert result.status == "checked"
-    assert result.facts["warranty_years"].requires_review is review
+    assert result.facts["warranty_years"].relation == choice
+    assert result.facts["warranty_years"].confidence == confidence
+    assert "requires_review" not in result.model_dump()["facts"]["warranty_years"]
     assert result.revision == nli.REVISION
     assert result.output_tokens == 0
     assert facts.warranty_years == 3
@@ -91,3 +93,106 @@ def test_missing_source_rejected(monkeypatch):
     facts = SupplierFacts(supplier_name="Dell", warranty_years=3, warranty_evidence=FactEvidence(evidence_ids=[99]))
     with pytest.raises(EvidenceValidationError):
         evidence_judgment.judge_supplier_facts(facts, {})
+
+def test_reservation_runs_before_model_execution(runtime):
+    _, model = runtime
+
+    def reserve():
+        model.assert_not_called()
+
+    reservation = Mock(side_effect=reserve)
+
+    nli.judge_claims(
+        {
+            "warranty_years": {
+                "claim": "The warranty is 3 years.",
+                "evidence": [{"text": "Warranty: 3 years."}],
+            }
+        },
+        before_model_call=reservation,
+    )
+
+    reservation.assert_called_once_with()
+    model.assert_called_once()
+
+@pytest.mark.parametrize("limit", [0, 2])
+def test_model_budget_blocks_additional_nli_execution(runtime, limit):
+    _, model = runtime
+    budget = ExecutionBudget(max_model_calls=limit)
+
+    def reserve():
+        nonlocal budget
+        budget = budget.reserve_model_call()
+
+    claims = {
+        name: {
+            "claim": "The warranty is 3 years.",
+            "evidence": [{"text": "Warranty: 3 years."}],
+        }
+        for name in ("first", "second", "third")
+    }
+
+    with pytest.raises(BudgetExceededError):
+        nli.judge_claims(
+            claims,
+            before_model_call=reserve,
+        )
+
+    assert model.call_count == limit
+    assert budget.model_calls_used == limit
+
+def test_oversized_pair_does_not_reserve_model_call(runtime):
+    tokenizer, model = runtime
+
+    tokenizer.return_value = {
+        "input_ids": torch.ones(
+            (1, 513),
+            dtype=torch.long,
+        )
+    }
+
+    reservation = Mock()
+
+    with pytest.raises(AIOutputError, match="512-token"):
+        nli.judge_claims(
+            {
+                "warranty_years": {
+                    "claim": "The warranty is 3 years.",
+                    "evidence": [{"text": "Long evidence."}],
+                }
+            },
+            before_model_call=reservation,
+        )
+
+    reservation.assert_not_called()
+    model.assert_not_called()
+
+def test_supplier_judgment_forwards_model_reservation(monkeypatch, runtime):
+    monkeypatch.setenv("NLI_EVIDENCE_JUDGMENT_ENABLED", "true")
+
+    facts = SupplierFacts(
+        supplier_name="Dell",
+        warranty_years=3,
+        warranty_evidence=FactEvidence(evidence_ids=[1]),
+    )
+
+    evidence = {
+        1: EvidenceReference(
+            chunk_id=uuid.uuid4(),
+            document_version_id=uuid.uuid4(),
+            filename="dell.pdf",
+            page_number=1,
+            text="Warranty: 3 years.",
+        )
+    }
+
+    reservation = Mock()
+
+    result = evidence_judgment.judge_supplier_facts(
+        facts,
+        evidence,
+        before_model_call=reservation,
+    )
+
+    assert result.status == "checked"
+    reservation.assert_called_once_with()

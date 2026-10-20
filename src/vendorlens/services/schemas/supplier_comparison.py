@@ -61,7 +61,6 @@ class FactJudgment(BaseModel):
     relation: Relation
     confidence: Probability
     probabilities: dict[Relation, Probability]
-    requires_review: bool
 
 
 class EvidenceJudgment(BaseModel):
