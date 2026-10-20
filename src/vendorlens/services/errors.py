@@ -12,3 +12,7 @@ class AIOutputError(Exception):
 
 class AIServiceUnavailableError(Exception):
     """The AI provider could not be reached."""
+
+
+class WorkflowNotFoundError(LookupError):
+    """The workflow does not exist within the requested event."""

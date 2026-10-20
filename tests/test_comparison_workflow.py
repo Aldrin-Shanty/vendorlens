@@ -584,3 +584,82 @@ def test_start_service_saves_workflow_under_returned_id(operations):
     assert snapshot.values["supplier_ids"] == supplier_ids
     assert snapshot.values["status"] == "awaiting_review"
     assert snapshot.next == ("human_review",)
+
+def test_get_service_reads_state_without_repeating_work(operations):
+    from vendorlens.workflows.services import (
+        get_comparison_workflow,
+        start_comparison_workflow,
+    )
+
+    supplier_ids, *services = operations
+    event_id = uuid.uuid4()
+    saver = InMemorySaver()
+    db = Mock(spec=Session)
+
+    workflow_id = start_comparison_workflow(
+        db,
+        checkpointer=saver,
+        procurement_event_id=event_id,
+        supplier_ids=supplier_ids,
+        budget=ExecutionBudget(
+            max_model_calls=6,
+            max_tool_calls=2,
+        ),
+    )
+    calls_before = [service.call_count for service in services]
+
+    state = get_comparison_workflow(
+        db,
+        checkpointer=saver,
+        procurement_event_id=event_id,
+        workflow_id=workflow_id,
+    )
+
+    assert state["procurement_event_id"] == event_id
+    assert state["supplier_ids"] == supplier_ids
+    assert state.get("status") == "awaiting_review"
+    assert state.get("comparison") is not None
+    assert state.get("review_issues")
+    assert [service.call_count for service in services] == calls_before
+
+
+@pytest.mark.parametrize("wrong_event", [False, True])
+def test_get_service_rejects_unknown_or_wrong_event_workflow(
+    operations, wrong_event
+):
+    from vendorlens.workflows.services import (
+        WorkflowNotFoundError,
+        get_comparison_workflow,
+        start_comparison_workflow,
+    )
+
+    supplier_ids, *services = operations
+    event_id = uuid.uuid4()
+    saver = InMemorySaver()
+    db = Mock(spec=Session)
+
+    workflow_id = start_comparison_workflow(
+        db,
+        checkpointer=saver,
+        procurement_event_id=event_id,
+        supplier_ids=supplier_ids,
+        budget=ExecutionBudget(
+            max_model_calls=6,
+            max_tool_calls=2,
+        ),
+    )
+    calls_before = [service.call_count for service in services]
+
+    with pytest.raises(WorkflowNotFoundError):
+        get_comparison_workflow(
+            db,
+            checkpointer=saver,
+            procurement_event_id=(
+                uuid.uuid4() if wrong_event else event_id
+            ),
+            workflow_id=(
+                workflow_id if wrong_event else uuid.uuid4()
+            ),
+        )
+
+    assert [service.call_count for service in services] == calls_before
